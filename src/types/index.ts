@@ -64,8 +64,6 @@ export interface MeterLog {
   deltaKwh: number; // Actual vs predicted variance
   auditStatus: 'Verified' | 'Calibrated' | 'Pending';
   note?: string;
-  batteryPercent?: number; // Battery level percentage at logging time
-  batteryKwh?: number; // Alias for eveningRemainingKwh (stored battery kWh)
   // Backward compatibility fields
   morningReadingKwh?: number;
   daytimeReadingKwh?: number;

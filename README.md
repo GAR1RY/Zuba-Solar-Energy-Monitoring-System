@@ -4,46 +4,29 @@ Zuba is an open-source, web-based photovoltaic and energy storage monitoring pla
 
 ---
 
-## Cloning & Running in VS Code via Git
+## Running Locally on Localhost (Zip Download)
 
-To clone this repository and run it locally in **VS Code**:
+This application is completely self-contained and works out of the box on `localhost` without requiring any cloud databases or external API keys.
 
 ### 1. Prerequisites
-- **Node.js** (version 18, 20, or newer) - [Download Node.js](https://nodejs.org/)
-- **Git** - [Download Git](https://git-scm.com/)
-- **Visual Studio Code** - [Download VS Code](https://code.visualstudio.com/)
+- **Node.js** (version 18, 20, or newer recommended)
+- **npm** (included with Node.js)
 
-### 2. Clone the Repository & Open in VS Code
-Open your terminal (or VS Code integrated terminal) and run:
-
-```bash
-# Clone the repository
-git clone <your-repository-url>
-cd <repository-folder>
-
-# Open the project in VS Code
-code .
-```
-
-### 3. Recommended VS Code Extensions
-When you open the project in VS Code, you will be prompted to install recommended extensions (Prettier, ESLint, Tailwind CSS IntelliSense). Click **Install All** for the best development experience.
-
-### 4. Install Dependencies & Run Development Server
-In the VS Code integrated terminal (`Ctrl+` ` or `Cmd+``):
+### 2. Quick Start
+After downloading and extracting the `.zip` archive:
 
 ```bash
-# 1. Install dependencies
+# 1. Open your terminal in the extracted project folder
+cd <extracted-folder>
+
+# 2. Install dependencies
 npm install
 
-# 2. (Optional) Set up environment variables
-cp .env.example .env
-# Fill in your GEMINI_API_KEY in .env if you want AI predictions enabled locally.
-
-# 3. Start the local dev server
+# 3. Start the local development server
 npm run dev
 ```
 
-### 5. Open in Browser
+### 3. Open in Browser
 Visit **`http://localhost:3000`** in your browser.
 
 - **Instant Sign-In**: Use the "Operator Account" or "Admin Console" quick-buttons on the sign-in screen, or create your own custom account.
@@ -52,7 +35,6 @@ Visit **`http://localhost:3000`** in your browser.
 - **Solar AI Intelligence**: System-grounded predictions for battery 100% full charge time, morning vs daytime generation, and night energy storage balance. Runs locally with zero setup and connects to Gemini when an API key is available.
 
 ---
-
 
 ## Production Build & Preview
 

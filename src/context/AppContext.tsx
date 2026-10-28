@@ -31,11 +31,10 @@ interface AppContextType {
     params:
       | {
           date: string;
-          batteryKwh?: number;
-          eveningRemainingKwh?: number;
           totalGenerationKwh?: number;
           totalDayGenerationKwh?: number;
-          consumedKwh?: number;
+          consumedKwh: number;
+          eveningRemainingKwh: number;
           note?: string;
           morningKwh?: number;
           daytimeKwh?: number;
@@ -44,7 +43,7 @@ interface AppContextType {
     legacyMorning?: number,
     legacyEvening?: number,
     legacyNote?: string
-  ) => { delta: number; newFactor: number; totalDayKwh: number; netKwh: number; batteryKwh: number; batteryPercent: number };
+  ) => { delta: number; newFactor: number; totalDayKwh: number; netKwh: number };
 
   maintenanceTasks: MaintenanceTask[];
   toggleMaintenanceTask: (taskId: string) => void;
@@ -264,11 +263,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     paramsOrDate:
       | {
           date: string;
-          batteryKwh?: number;
-          eveningRemainingKwh?: number;
           totalGenerationKwh?: number;
           totalDayGenerationKwh?: number;
-          consumedKwh?: number;
+          consumedKwh: number;
+          eveningRemainingKwh: number;
           note?: string;
           morningKwh?: number;
           daytimeKwh?: number;
@@ -278,31 +276,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     legacyEvening?: number,
     legacyNote?: string
   ) => {
-    if (!currentSystem) return { delta: 0, newFactor: 1.0, totalDayKwh: 0, netKwh: 0, batteryKwh: 0, batteryPercent: 0 };
+    if (!currentSystem) return { delta: 0, newFactor: 1.0, totalDayKwh: 0, netKwh: 0 };
 
     let date = '';
-    let batteryKwh = 0;
-    let eveningRemainingKwh = 0;
     let totalDayKwh = 0;
     let consumedKwh = 0;
+    let eveningRemainingKwh = 0;
     let note = '';
-
-    const capacity = currentSystem.batteryCapacityKwh || 10;
 
     if (typeof paramsOrDate === 'object') {
       date = paramsOrDate.date;
-      batteryKwh = paramsOrDate.batteryKwh !== undefined ? paramsOrDate.batteryKwh : (paramsOrDate.eveningRemainingKwh || 0);
-      eveningRemainingKwh = batteryKwh;
-
       if (paramsOrDate.totalGenerationKwh !== undefined) {
         totalDayKwh = paramsOrDate.totalGenerationKwh;
       } else if (paramsOrDate.totalDayGenerationKwh !== undefined) {
         totalDayKwh = paramsOrDate.totalDayGenerationKwh;
       } else {
-        totalDayKwh = Number((batteryKwh * 1.35).toFixed(2));
+        totalDayKwh = (paramsOrDate.morningKwh || 0) + (paramsOrDate.daytimeKwh || 0);
       }
-
-      consumedKwh = paramsOrDate.consumedKwh !== undefined ? paramsOrDate.consumedKwh : Number((totalDayKwh * 0.45).toFixed(2));
+      consumedKwh = paramsOrDate.consumedKwh;
+      eveningRemainingKwh = paramsOrDate.eveningRemainingKwh;
       note = paramsOrDate.note || '';
     } else {
       date = paramsOrDate;
@@ -310,13 +302,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const eveningReading = legacyEvening || morningKwh;
       const diff = Math.max(0, eveningReading - morningKwh);
       totalDayKwh = diff > 0 ? diff : morningKwh;
-      consumedKwh = Number((totalDayKwh * 0.5).toFixed(2));
-      batteryKwh = Number((capacity * 0.7).toFixed(1));
-      eveningRemainingKwh = batteryKwh;
+      consumedKwh = totalDayKwh * 0.5;
+      eveningRemainingKwh = currentSystem.batteryCapacityKwh * 0.7;
       note = legacyNote || '';
     }
 
-    const batteryPercent = Math.min(100, Math.round((batteryKwh / capacity) * 100));
     totalDayKwh = Number(totalDayKwh.toFixed(2));
     const netKwh = Number((totalDayKwh - consumedKwh).toFixed(2));
 
@@ -343,23 +333,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       date,
       totalDayGenerationKwh: totalDayKwh,
       energyConsumedKwh: consumedKwh,
-      eveningRemainingKwh: batteryKwh,
-      batteryPercent,
+      eveningRemainingKwh: eveningRemainingKwh,
       netKwh,
       predictedKwh: predicted,
       deltaKwh: delta,
       auditStatus: 'Calibrated',
-      note: note || `Battery: ${batteryKwh} kWh (${batteryPercent}%) · γ = ${newFactor.toFixed(4)}`,
+      note: note || `Sunset log · Tuned γ to ${newFactor.toFixed(4)}`,
       morningReadingKwh: 0,
       daytimeReadingKwh: totalDayKwh,
-      eveningReadingKwh: batteryKwh,
+      eveningReadingKwh: eveningRemainingKwh,
     };
 
     const updatedLogs = [newLog, ...meterLogs];
     setMeterLogs(updatedLogs);
     storage.saveMeterLogs(updatedLogs);
 
-    return { delta, newFactor, totalDayKwh, netKwh, batteryKwh, batteryPercent };
+    return { delta, newFactor, totalDayKwh, netKwh };
   };
 
   // Maintenance Checklist Actions & Resetting

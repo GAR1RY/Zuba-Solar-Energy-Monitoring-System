@@ -75,20 +75,20 @@ export function askZubaSolarAI(question: string, context: ZubaSystemContext): st
     (q.includes('generate') && (q.includes('day') || q.includes('today') || q.includes('yesterday')))
   ) {
     if (meterLogs.length === 0) {
-      return `No meter logs have been recorded yet for ${system.name}. Enter your log date and battery level (kWh) in the Meter History tab to get instant night backup predictions.`;
+      return `No sunset meter logs have been recorded yet for ${system.name}. Record your single daily log right before sunset in the Meter History tab to track total daylight production, consumption, and night battery reserve.`;
     }
 
     const latest = meterLogs[0];
-    const capacity = system.batteryCapacityKwh || 10;
-    const stored = latest.eveningRemainingKwh !== undefined ? latest.eveningRemainingKwh : latest.eveningReadingKwh || 0;
-    const pct = latest.batteryPercent !== undefined ? latest.batteryPercent : Math.min(100, Math.round((stored / capacity) * 100));
-    const avgNightLoad = Math.max(0.3, system.panelCount * 0.04);
-    const hours = (stored / avgNightLoad).toFixed(1);
+    const total = latest.totalDayGenerationKwh !== undefined ? latest.totalDayGenerationKwh : ((latest.morningReadingKwh || 0) + (latest.daytimeReadingKwh || 0));
+    const consumed = latest.energyConsumedKwh || 0;
+    const eveningLeft = latest.eveningRemainingKwh !== undefined ? latest.eveningRemainingKwh : 0;
+    const net = Number((total - consumed).toFixed(1));
 
-    return `According to your meter log for ${latest.date}:
-• Battery Stored: ${stored.toFixed(1)} kWh (${pct}% of ${capacity} kWh capacity)
-• Night Backup Prediction: ~${hours} hours until morning
-• Status: ${Number(hours) >= 10 ? 'Will comfortably last through the night' : 'Sufficient for essential loads, keep heavy appliances off'}.`;
+    return `According to your sunset meter log for ${latest.date}:
+• Total Solar Produced (Dawn to Sunset): ${total.toFixed(1)} kWh
+• Total Consumed by Loads: ${consumed.toFixed(1)} kWh
+• Net Energy Balance: ${net >= 0 ? `+${net}` : net} kWh (${net >= 0 ? 'Surplus' : 'Deficit'})
+• Battery Storage Left for Night: ${eveningLeft.toFixed(1)} kWh in battery bank.`;
   }
 
   // 4. Night / Evening energy left & night endurance
