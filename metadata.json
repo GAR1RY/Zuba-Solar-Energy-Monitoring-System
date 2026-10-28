@@ -1,0 +1,6 @@
+{
+  "name": "Zuba Solar Energy Monitoring System",
+  "description": "Production-grade, web-based solar energy and battery storage monitoring platform with live weather-adjusted yield prediction and daily meter calibration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
