@@ -7,6 +7,11 @@ export interface ZambianLocationProfile {
   baseTempC: number;
 }
 
+export interface WeatherCoordinates {
+  latitude: number;
+  longitude: number;
+}
+
 export const DEFAULT_PROVINCE = 'Lusaka Province';
 
 export const ZAMBIAN_PROVINCES = [
@@ -119,47 +124,114 @@ export function generateSimulatedWeather(locationName: string = DEFAULT_PROVINCE
     temperatureC: temp,
     humidity,
     cloudCover,
+    uvIndex: null,
     description,
     source: 'simulated',
   };
 }
 
-/**
- * Attempts OpenWeatherMap API fetch if key is provided; otherwise returns realistic simulation.
- */
-export async function fetchWeather(locationName: string = DEFAULT_PROVINCE, apiKey?: string): Promise<WeatherSnapshot> {
-  const cleanLoc = ZAMBIAN_LOCATIONS[locationName] ? locationName : DEFAULT_PROVINCE;
+function describeWeatherCode(code: number): string {
+  if (code === 0) return 'Clear Sky';
+  if ([1, 2, 3].includes(code)) return 'Partly Cloudy';
+  if ([45, 48].includes(code)) return 'Foggy';
+  if ([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82].includes(code)) return 'Showers';
+  if ([71, 73, 75, 77, 85, 86].includes(code)) return 'Snow/Rain Mix';
+  if ([95, 96, 99].includes(code)) return 'Thunderstorm';
+  return 'Cloudy';
+}
 
-  if (!apiKey || apiKey.trim() === '') {
-    return generateSimulatedWeather(cleanLoc);
-  }
+async function fetchOpenMeteoWeather(
+  locationName: string,
+  coordinates?: WeatherCoordinates | null
+): Promise<WeatherSnapshot | null> {
+  const profile = ZAMBIAN_LOCATIONS[locationName] || ZAMBIAN_LOCATIONS[DEFAULT_PROVINCE];
+  const latitude = coordinates?.latitude ?? profile.lat;
+  const longitude = coordinates?.longitude ?? profile.lon;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
 
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3500);
-
-    const queryCity = cleanLoc.replace(' Province', '');
-    const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(queryCity)},ZM&units=metric&appid=${apiKey.trim()}`;
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,cloud_cover,weather_code,uv_index&timezone=auto&forecast_days=1`;
     const response = await fetch(url, { signal: controller.signal });
-    clearTimeout(timeoutId);
+    if (!response.ok) return null;
 
-    if (response.ok) {
-      const data = await response.json();
-      return {
-        id: `owm-${Date.now()}`,
-        city: cleanLoc,
-        timestamp: new Date().toISOString(),
-        temperatureC: Number(data.main.temp.toFixed(1)),
-        humidity: Math.round(data.main.humidity),
-        cloudCover: Math.round(data.clouds.all),
-        description: data.weather?.[0]?.description
-          ? data.weather[0].description.replace(/\b\w/g, (c: string) => c.toUpperCase())
-          : 'Clear Sky',
-        source: 'live',
-      };
-    }
+    const data = await response.json();
+    const current = data.current ?? {};
+
+    return {
+      id: `meteo-${Date.now()}`,
+      city: profile.name,
+      timestamp: new Date().toISOString(),
+      temperatureC: Number((current.temperature_2m ?? profile.baseTempC).toFixed(1)),
+      humidity: Math.round(current.relative_humidity_2m ?? 60),
+      cloudCover: Math.round(current.cloud_cover ?? 25),
+      uvIndex: typeof current.uv_index === 'number' ? Number(current.uv_index.toFixed(1)) : null,
+      latitude: Number(data.latitude ?? latitude),
+      longitude: Number(data.longitude ?? longitude),
+      description: describeWeatherCode(Number(current.weather_code ?? 1)),
+      source: 'live',
+      provider: 'Open-Meteo',
+    };
   } catch {
-    // Graceful fallback to simulation
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+/**
+ * Uses the free Open-Meteo API for real weather data when available, and falls back to the built-in Zambia simulation.
+ */
+export async function fetchWeather(
+  locationName: string = DEFAULT_PROVINCE,
+  apiKey?: string,
+  coordinates?: WeatherCoordinates | null
+): Promise<WeatherSnapshot> {
+  const cleanLoc = ZAMBIAN_LOCATIONS[locationName] ? locationName : DEFAULT_PROVINCE;
+  const profile = ZAMBIAN_LOCATIONS[cleanLoc];
+  const latitude = coordinates?.latitude ?? profile.lat;
+  const longitude = coordinates?.longitude ?? profile.lon;
+
+  if (apiKey && apiKey.trim() !== '') {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3500);
+
+      const locationQuery = coordinates
+        ? `lat=${latitude}&lon=${longitude}`
+        : `q=${encodeURIComponent(cleanLoc.replace(' Province', ''))},ZM`;
+      const url = `https://api.openweathermap.org/data/2.5/weather?${locationQuery}&units=metric&appid=${apiKey.trim()}`;
+      const response = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        const data = await response.json();
+        return {
+          id: `owm-${Date.now()}`,
+          city: cleanLoc,
+          timestamp: new Date().toISOString(),
+          temperatureC: Number(data.main.temp.toFixed(1)),
+          humidity: Math.round(data.main.humidity),
+          cloudCover: Math.round(data.clouds.all),
+          uvIndex: null,
+          latitude: Number(data.coord?.lat ?? latitude),
+          longitude: Number(data.coord?.lon ?? longitude),
+          description: data.weather?.[0]?.description
+            ? data.weather[0].description.replace(/\b\w/g, (c: string) => c.toUpperCase())
+            : 'Clear Sky',
+          source: 'live',
+          provider: 'OpenWeather',
+        };
+      }
+    } catch {
+      // Fall through to Open-Meteo below.
+    }
+  }
+
+  const freeWeather = await fetchOpenMeteoWeather(cleanLoc, coordinates);
+  if (freeWeather) {
+    return freeWeather;
   }
 
   return generateSimulatedWeather(cleanLoc);

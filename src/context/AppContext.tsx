@@ -2,13 +2,13 @@ import React, { createContext, useContext, useEffect, useState, useMemo, useCall
 import { Alert, MaintenanceTask, MeterLog, Reading, SolarSystem, User, UserSettings, WeatherSnapshot } from '../types';
 import { storage } from '../services/storage';
 import { calculateExpectedDailyKwh, tuneCorrectionFactor } from '../services/estimator';
-import { fetchWeather } from '../services/weather';
+import { fetchWeather, WeatherCoordinates } from '../services/weather';
 
 interface AppContextType {
   currentUser: User | null;
   allUsers: User[];
-  login: (email: string) => boolean;
-  register: (name: string, email: string) => boolean;
+  login: (email: string, password: string) => Promise<boolean>;
+  register: (name: string, email: string, password: string) => Promise<boolean>;
   logout: () => void;
   toggleUserStatus: (userId: string) => void;
   deleteUser: (userId: string) => void;
@@ -21,7 +21,7 @@ interface AppContextType {
   deleteSystem: (id: string) => void;
 
   weather: WeatherSnapshot | null;
-  refreshWeather: (city?: string) => Promise<void>;
+  refreshWeather: (city?: string, coordinates?: WeatherCoordinates | null) => Promise<void>;
 
   liveReading: Reading | null;
   triggerLiveTick: () => void;
@@ -33,8 +33,8 @@ interface AppContextType {
           date: string;
           totalGenerationKwh?: number;
           totalDayGenerationKwh?: number;
-          consumedKwh: number;
-          eveningRemainingKwh: number;
+          consumedKwh?: number;
+          eveningRemainingKwh?: number;
           note?: string;
           morningKwh?: number;
           daytimeKwh?: number;
@@ -69,6 +69,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [selectedSystemId, setSelectedSystemId] = useState<string>(() => storage.getSelectedSystemId());
   const [settings, setSettings] = useState<UserSettings>(() => storage.getSettings());
   const [weather, setWeather] = useState<WeatherSnapshot | null>(null);
+  const [weatherCoordinates, setWeatherCoordinates] = useState<WeatherCoordinates | null>(null);
   const [liveReading, setLiveReading] = useState<Reading | null>(null);
   const [meterLogs, setMeterLogs] = useState<MeterLog[]>(() => storage.getMeterLogs());
   const [maintenanceTasks, setMaintenanceTasks] = useState<MaintenanceTask[]>(() => storage.getMaintenanceTasks());
@@ -134,11 +135,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [accessibleSystems, selectedSystemId]);
 
   // Refresh weather
-  const refreshWeather = useCallback(async (cityOverride?: string) => {
+  const refreshWeather = useCallback(async (cityOverride?: string, coordinates?: WeatherCoordinates | null) => {
     const targetCity = cityOverride || (currentSystem ? currentSystem.city : 'Lusaka');
-    const snap = await fetchWeather(targetCity, settings.openWeatherApiKey);
+    const targetCoordinates = coordinates === undefined ? weatherCoordinates : coordinates;
+    if (coordinates !== undefined) {
+      setWeatherCoordinates(coordinates);
+    }
+    const snap = await fetchWeather(targetCity, settings.openWeatherApiKey, targetCoordinates);
     setWeather(snap);
-  }, [currentSystem, settings.openWeatherApiKey]);
+  }, [currentSystem, settings.openWeatherApiKey, weatherCoordinates]);
 
   useEffect(() => {
     refreshWeather();
@@ -162,21 +167,70 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [triggerLiveTick]);
 
   // Auth methods
-  const login = (email: string) => {
+  const hashPassword = async (password: string): Promise<string> => {
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+    const digest = await crypto.subtle.deriveBits(
+      { name: 'PBKDF2', salt, iterations: 210000, hash: 'SHA-256' },
+      key,
+      256
+    );
+    const toHex = (bytes: Uint8Array) => Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+    return `${toHex(salt)}:${toHex(new Uint8Array(digest))}`;
+  };
+
+  const login = async (email: string, password: string) => {
     const cleanEmail = email.trim().toLowerCase();
+
+    try {
+      const response = await fetch('/api/auth/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail, password }),
+      });
+
+      if (response.ok) {
+        const adminUser = (await response.json()) as User;
+        setCurrentUser(adminUser);
+        setAllUsers((users) => [adminUser, ...users.filter((user) => user.email !== adminUser.email)]);
+        return true;
+      }
+
+      if (response.status !== 401) {
+        return false;
+      }
+    } catch {
+      // Local operator accounts can still sign in while the admin endpoint is unavailable.
+    }
+
     const found = allUsers.find((u) => u.email.toLowerCase() === cleanEmail);
-    if (found && found.isActive) {
+    const passwordHash = storage.getUserPasswordHash(cleanEmail);
+    if (found && found.role === 'user' && found.isActive && passwordHash) {
+      const [saltHex, expectedHash] = passwordHash.split(':');
+      const salt = new Uint8Array(saltHex.match(/.{2}/g)?.map((byte) => parseInt(byte, 16)) || []);
+      const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+      const digest = await crypto.subtle.deriveBits(
+        { name: 'PBKDF2', salt, iterations: 210000, hash: 'SHA-256' },
+        key,
+        256
+      );
+      const actualHash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+      if (actualHash !== expectedHash) return false;
       setCurrentUser(found);
-      storage.setCurrentUser(found);
       return true;
     }
     return false;
   };
 
-  const register = (name: string, email: string) => {
+  const register = async (name: string, email: string, password: string) => {
     const cleanEmail = email.trim().toLowerCase();
     const existing = allUsers.find((u) => u.email.toLowerCase() === cleanEmail);
-    if (existing) return false;
+    if (existing) {
+      if (existing.role !== 'user' || storage.getUserPasswordHash(cleanEmail)) return false;
+      storage.saveUserPasswordHash(cleanEmail, await hashPassword(password));
+      setCurrentUser(existing);
+      return true;
+    }
 
     const newUser: User = {
       id: `usr_${Date.now()}`,
@@ -187,12 +241,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString(),
     };
 
+    storage.saveUserPasswordHash(cleanEmail, await hashPassword(password));
     const updatedUsers = [...allUsers, newUser];
     setAllUsers(updatedUsers);
     storage.saveUsers(updatedUsers);
 
     setCurrentUser(newUser);
-    storage.setCurrentUser(newUser);
 
     // No auto-seeded dummy system; start completely clean with space to add a system
     return true;
@@ -200,7 +254,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const logout = () => {
     setCurrentUser(null);
-    storage.setCurrentUser(null);
   };
 
   const toggleUserStatus = (userId: string) => {
@@ -265,8 +318,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           date: string;
           totalGenerationKwh?: number;
           totalDayGenerationKwh?: number;
-          consumedKwh: number;
-          eveningRemainingKwh: number;
+          consumedKwh?: number;
+          eveningRemainingKwh?: number;
           note?: string;
           morningKwh?: number;
           daytimeKwh?: number;
@@ -293,8 +346,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } else {
         totalDayKwh = (paramsOrDate.morningKwh || 0) + (paramsOrDate.daytimeKwh || 0);
       }
-      consumedKwh = paramsOrDate.consumedKwh;
-      eveningRemainingKwh = paramsOrDate.eveningRemainingKwh;
+      consumedKwh = paramsOrDate.consumedKwh ?? 0;
+      eveningRemainingKwh = paramsOrDate.eveningRemainingKwh ?? 0;
       note = paramsOrDate.note || '';
     } else {
       date = paramsOrDate;
@@ -402,7 +455,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Settings
   const updateSettings = (updates: Partial<UserSettings>) => {
-    const updated = { ...settings, ...updates };
+    const permittedUpdates = { ...updates };
+    if (currentUser?.role !== 'admin') {
+      delete permittedUpdates.tariffZmw;
+      delete permittedUpdates.openWeatherApiKey;
+    }
+    if (Object.keys(permittedUpdates).length === 0) return;
+
+    const updated = { ...settings, ...permittedUpdates };
     setSettings(updated);
     storage.saveSettings(updated);
   };

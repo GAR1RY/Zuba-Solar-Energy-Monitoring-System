@@ -12,7 +12,13 @@ This application is completely self-contained and works out of the box on `local
 - **Node.js** (version 18, 20, or newer recommended)
 - **npm** (included with Node.js)
 
-### 2. Quick Start
+### 2. Configure Admin Sign-In
+
+Admin access is verified by the local server. Copy `.env.example` to `.env`, then set a unique, strong `ZUBA_ADMIN_PASSWORD`. The default admin email is `garrymapulanga@gmail.com`; `ZUBA_ADMIN_NAME` and `ZUBA_ADMIN_EMAIL` can be customized in `.env`. Do not commit `.env` or share the password.
+
+The app starts signed out whenever the page is opened. Admin sign-in uses the configured admin email and password; no admin/demo button is shown. Regular operator accounts are created with an email and password and remain stored locally in that browser.
+
+### 3. Quick Start
 After downloading and extracting the `.zip` archive:
 
 ```bash
@@ -26,10 +32,10 @@ npm install
 npm run dev
 ```
 
-### 3. Open in Browser
+### 4. Open in Browser
 Visit **`http://localhost:3000`** in your browser.
 
-- **Instant Sign-In**: Use the "Operator Account" or "Admin Console" quick-buttons on the sign-in screen, or create your own custom account.
+- **Sign-In**: Sign in with an existing operator account or create one. Admin credentials are configured separately in the server `.env` file.
 - **Local Persistence**: Data (solar systems, real meter logs, maintenance cycles, and theme preference) is automatically stored in your browser's `localStorage`.
 - **Zero Config Required**: Weather simulation across the Provinces of Zambia runs locally without requiring an OpenWeather API key. If you have an OpenWeather key, you can optionally connect it in Weather Telemetry.
 - **Solar AI Intelligence**: System-grounded predictions for battery 100% full charge time, morning vs daytime generation, and night energy storage balance. Runs locally with zero setup and connects to Gemini when an API key is available.

@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
-import { Users, Sun, Activity, UserX, UserCheck, Trash2 } from 'lucide-react';
+import { Users, Sun, Activity, UserX, UserCheck, Trash2, CircleDollarSign } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 export const Admin: React.FC = () => {
-  const { allUsers, systems, toggleUserStatus, deleteUser, weather } = useApp();
+  const { currentUser, allUsers, systems, toggleUserStatus, deleteUser, weather, settings, updateSettings } = useApp();
   const [userToDelete, setUserToDelete] = useState<string | null>(null);
+  const [tariffInput, setTariffInput] = useState(String(settings.tariffZmw));
+  const [tariffMessage, setTariffMessage] = useState<string | null>(null);
 
   const classCounts = {
     Residential: systems.filter((s) => s.systemClass === 'Residential').length,
@@ -13,6 +15,25 @@ export const Admin: React.FC = () => {
   };
 
   const totalSolars = systems.reduce((acc, s) => acc + s.panelCount, 0);
+
+  if (currentUser?.role !== 'admin') {
+    return (
+      <div role="alert" className="max-w-2xl mx-auto p-5 rounded-2xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 text-sm text-red-800 dark:text-red-200">
+        Administrator access is required to view this page.
+      </div>
+    );
+  }
+
+  const handleSaveTariff = (event: React.FormEvent) => {
+    event.preventDefault();
+    const tariff = Number(tariffInput);
+    if (!Number.isFinite(tariff) || tariff < 0 || tariff > 1000) {
+      setTariffMessage('Enter a tariff between K0 and K1,000 per kWh.');
+      return;
+    }
+    updateSettings({ tariffZmw: tariff });
+    setTariffMessage('Tariff updated. Savings estimates now use this rate.');
+  };
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
@@ -95,6 +116,58 @@ export const Admin: React.FC = () => {
             </div>
           ))}
         </div>
+      </div>
+
+      {/* Platform-wide energy tariff */}
+      <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200/80 dark:border-neutral-800/80 p-5 sm:p-6 shadow-xs">
+        <div className="flex items-start gap-3">
+          <div className="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-700 dark:text-amber-400 flex items-center justify-center shrink-0">
+            <CircleDollarSign className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+              Energy Tariff
+            </h3>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
+              Set the ZMW cost per kWh used for the dashboard and AI savings estimates.
+            </p>
+          </div>
+        </div>
+        <form onSubmit={handleSaveTariff} className="mt-4 flex flex-col sm:flex-row sm:items-end gap-3">
+          <label className="block flex-1 text-xs font-semibold text-neutral-700 dark:text-neutral-300">
+            Tariff (ZMW per kWh)
+            <div className="mt-1 flex items-center rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 focus-within:ring-1 focus-within:ring-amber-500">
+              <span className="pl-3 text-xs text-neutral-500">K</span>
+              <input
+                type="number"
+                min="0"
+                max="1000"
+                step="0.01"
+                required
+                value={tariffInput}
+                onChange={(event) => {
+                  setTariffInput(event.target.value);
+                  setTariffMessage(null);
+                }}
+                className="w-full px-2.5 py-2 text-xs bg-transparent text-neutral-900 dark:text-neutral-100 focus:outline-none tabular-nums"
+              />
+            </div>
+          </label>
+          <button
+            type="submit"
+            className="px-4 py-2.5 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-xs font-semibold hover:bg-neutral-800 dark:hover:bg-neutral-100 transition-colors"
+          >
+            Save tariff
+          </button>
+        </form>
+        {tariffMessage && (
+          <p role="status" className={`mt-3 text-xs ${tariffMessage.startsWith('Enter') ? 'text-red-700 dark:text-red-300' : 'text-emerald-700 dark:text-emerald-300'}`}>
+            {tariffMessage}
+          </p>
+        )}
+        <p className="mt-3 text-[11px] text-neutral-400 dark:text-neutral-500">
+          This setting is saved in this browser and is used by its savings estimates.
+        </p>
       </div>
 
       {/* User Management Table */}

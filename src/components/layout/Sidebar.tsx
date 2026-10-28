@@ -11,8 +11,6 @@ import {
   ShieldAlert,
   LogOut,
   X,
-  Sun,
-  Moon,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
@@ -24,14 +22,8 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, isOpen, onClose }) => {
-  const { currentUser, logout, alerts, settings, toggleTheme } = useApp();
+  const { currentUser, logout, alerts } = useApp();
   const unreadAlertsCount = alerts.filter((a) => !a.isRead).length;
-
-  const isDarkMode =
-    settings.theme === 'dark' ||
-    (settings.theme === 'system' &&
-      typeof window !== 'undefined' &&
-      window.matchMedia('(prefers-color-scheme: dark)').matches);
 
   const navItems = [
     { id: 'home', label: 'Overview', icon: LayoutDashboard },
@@ -147,28 +139,18 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, isOpe
           </nav>
         </div>
 
-        {/* Sidebar bottom: Light/Dark mode quick toggle, User Card, Sign Out */}
+        {/* Sidebar bottom: User Card and Sign Out */}
         <div className="border-t border-neutral-200/80 dark:border-neutral-800/80 pt-4 px-1 space-y-3">
-          {/* Quick Light & Dark Mode Toggle Button */}
-          <button
-            onClick={toggleTheme}
-            className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-neutral-700 dark:text-neutral-200 bg-neutral-100/60 dark:bg-neutral-800/60 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-xl transition-all active:scale-[0.98] cursor-pointer"
-            title="Toggle Light or Dark Mode"
-          >
-            <span className="flex items-center gap-2">
-              <Moon className={`w-3.5 h-3.5 ${isDarkMode ? 'text-amber-400 fill-amber-400/40' : 'text-neutral-500'}`} />
-              <span>{isDarkMode ? 'Dark Mode' : 'Light Mode'}</span>
-            </span>
-            <span className="text-[10px] uppercase font-bold tracking-wider text-amber-600 dark:text-amber-400">
-              Toggle
-            </span>
-          </button>
-
           {currentUser && (
             <div className="px-2 pt-1">
               <div className="text-xs font-semibold text-neutral-900 dark:text-neutral-200 truncate">
                 {currentUser.name}
               </div>
+              {currentUser.role === 'admin' && (
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
+                  Admin account
+                </div>
+              )}
               <div className="text-[11px] text-neutral-500 dark:text-neutral-400 truncate">
                 {currentUser.email}
               </div>

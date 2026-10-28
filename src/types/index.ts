@@ -37,8 +37,12 @@ export interface WeatherSnapshot {
   temperatureC: number;
   humidity: number;
   cloudCover: number;
+  uvIndex: number | null;
+  latitude?: number;
+  longitude?: number;
   description: string;
   source: 'live' | 'simulated';
+  provider?: 'Open-Meteo' | 'OpenWeather';
 }
 
 export interface Reading {

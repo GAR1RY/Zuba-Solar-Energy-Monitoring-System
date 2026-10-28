@@ -81,7 +81,7 @@ export const ZubaFloatingAI: React.FC = () => {
 
       {/* Floating Pop-up Chat Window at Bottom Right */}
       {isOpen && (
-        <div className="fixed bottom-5 right-5 z-50 w-[92vw] sm:w-[380px] h-[520px] max-h-[85vh] bg-white dark:bg-neutral-900 rounded-3xl border border-neutral-200 dark:border-neutral-800 shadow-2xl flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-200">
+        <div className="fixed bottom-5 right-5 z-50 w-[min(88vw,340px)] h-[520px] max-h-[85vh] bg-white dark:bg-neutral-900 rounded-3xl border border-neutral-200 dark:border-neutral-800 shadow-2xl flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-200">
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3.5 bg-neutral-50/90 dark:bg-neutral-800/60 border-b border-neutral-100 dark:border-neutral-800">
             <div className="flex items-center gap-2.5">

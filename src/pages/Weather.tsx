@@ -1,22 +1,58 @@
 import React, { useState } from 'react';
-import { CloudSun, Thermometer, Droplets, RefreshCw, CheckCircle2, AlertCircle, Key, MapPin } from 'lucide-react';
+import { CloudSun, Thermometer, Droplets, RefreshCw, CheckCircle2, AlertCircle, Key, MapPin, Crosshair, Sun } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { DEFAULT_PROVINCE, ZAMBIAN_PROVINCES } from '../services/weather';
 
 export const Weather: React.FC = () => {
-  const { weather, refreshWeather, settings, updateSettings, currentSystem, updateSystem } = useApp();
+  const { currentUser, weather, refreshWeather, settings, updateSettings, currentSystem, updateSystem } = useApp();
 
   const [inputKey, setInputKey] = useState(settings.openWeatherApiKey || '');
   const [isTesting, setIsTesting] = useState(false);
+  const [isLocating, setIsLocating] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
 
   const activeLocation = weather?.city || currentSystem?.city || DEFAULT_PROVINCE;
 
   const handleLocationChange = async (location: string) => {
+    setLocationError(null);
     if (currentSystem) {
       updateSystem(currentSystem.id, { city: location });
     }
-    await refreshWeather(location);
+    await refreshWeather(location, null);
+  };
+
+  const handleUseCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      setLocationError('This browser does not support location access. Choose a province instead.');
+      return;
+    }
+
+    setIsLocating(true);
+    setLocationError(null);
+    navigator.geolocation.getCurrentPosition(
+      async ({ coords }) => {
+        try {
+          await refreshWeather(activeLocation, {
+            latitude: coords.latitude,
+            longitude: coords.longitude,
+          });
+        } catch {
+          setLocationError('Could not load live weather for your location. Please try again.');
+        } finally {
+          setIsLocating(false);
+        }
+      },
+      (error) => {
+        setLocationError(
+          error.code === error.PERMISSION_DENIED
+            ? 'Location permission was denied. Allow location access in your browser or choose a province.'
+            : 'Could not determine your location. Check your browser location settings and try again.'
+        );
+        setIsLocating(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 300000 }
+    );
   };
 
   const handleSaveAndTestKey = async (e: React.FormEvent) => {
@@ -29,21 +65,16 @@ export const Weather: React.FC = () => {
 
     try {
       await refreshWeather(activeLocation);
-      if (trimmed) {
-        setTestResult({
-          success: true,
-          message: 'Weather service connected. Live satellite data active.',
-        });
-      } else {
-        setTestResult({
-          success: true,
-          message: 'Running in simulated weather mode for Zambia.',
-        });
-      }
+      setTestResult({
+        success: true,
+        message: trimmed
+          ? 'Weather service connected with your API key.'
+          : 'Connected to the free Open-Meteo weather API for live Zambian conditions.',
+      });
     } catch {
       setTestResult({
         success: false,
-        message: 'Could not connect. Using simulated weather.',
+        message: 'Could not connect to the live API. Using the built-in Zambia weather simulation instead.',
       });
     } finally {
       setIsTesting(false);
@@ -73,7 +104,7 @@ export const Weather: React.FC = () => {
       </div>
 
       {/* Weather Metric Cards - Plain minimal English */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         {/* Temperature */}
         <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200/80 dark:border-neutral-800/80 p-5 shadow-xs">
           <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-xs font-medium">
@@ -85,7 +116,25 @@ export const Weather: React.FC = () => {
             <span className="text-base font-normal text-neutral-500 dark:text-neutral-400">°C</span>
           </div>
           <div className="text-[11px] text-neutral-400 dark:text-neutral-500 tabular-nums mt-1">
-            Outdoor solar module temperature: {weather ? weather.temperatureC : 26.5} °C
+            Air temperature at 2 m above ground
+          </div>
+        </div>
+
+        {/* UV Index */}
+        <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200/80 dark:border-neutral-800/80 p-5 shadow-xs">
+          <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400 text-xs font-medium">
+            <span>UV Index</span>
+            <Sun className="w-4 h-4 text-amber-500" />
+          </div>
+          <div className="text-3xl font-bold tracking-tight text-neutral-900 dark:text-neutral-100 tabular-nums mt-2">
+            {weather?.uvIndex ?? '—'}
+          </div>
+          <div className="text-[11px] text-neutral-400 dark:text-neutral-500 mt-1">
+            {weather?.uvIndex == null
+              ? weather?.source === 'simulated'
+                ? 'Not available for simulated data'
+                : 'Not available from this weather source'
+              : 'Current estimate'}
           </div>
         </div>
 
@@ -159,62 +208,97 @@ export const Weather: React.FC = () => {
             );
           })}
         </div>
-      </div>
 
-      {/* Optional OpenWeather API Key Connection Section */}
-      <div className="bg-white dark:bg-neutral-900 rounded-3xl border border-neutral-200/80 dark:border-neutral-800/80 p-6 sm:p-7 shadow-xs">
-        <div className="flex items-center justify-between mb-1">
-          <h2 className="text-base font-bold text-neutral-900 dark:text-neutral-100">
-            OpenWeather API Connection
-          </h2>
-          <span className="text-xs px-2.5 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 font-medium">
-            Live Feed or Simulation
-          </span>
-        </div>
-        <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-4">
-          Optional. Enter your OpenWeather key for live satellite data, or leave blank to use the built-in Zambia weather model.
-        </p>
-
-        <form onSubmit={handleSaveAndTestKey} className="space-y-3">
-          <div className="relative">
-            <Key className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="password"
-              value={inputKey}
-              onChange={(e) => setInputKey(e.target.value)}
-              placeholder="e.g. 8ab4f92d... (optional)"
-              className="w-full pl-9 pr-3 py-2.5 text-xs rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-amber-500"
-            />
-          </div>
-
-          <div className="flex items-center justify-end">
-            <button
-              type="submit"
-              disabled={isTesting}
-              className="px-5 py-2 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-xs font-semibold hover:bg-neutral-800 dark:hover:bg-neutral-100 transition-colors disabled:opacity-50 cursor-pointer active:scale-95"
-            >
-              {isTesting ? 'Verifying...' : 'Save & Test Key'}
-            </button>
-          </div>
-        </form>
-
-        {testResult && (
-          <div
-            className={`mt-4 p-3 rounded-xl text-xs flex items-start gap-2 ${
-              testResult.success
-                ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-900'
-                : 'bg-red-50 dark:bg-red-950/40 text-red-800 dark:text-red-300 border border-red-200 dark:border-red-900'
-            }`}
+        <div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-3">
+          <button
+            type="button"
+            onClick={handleUseCurrentLocation}
+            disabled={isLocating}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-xs font-semibold hover:bg-neutral-800 dark:hover:bg-neutral-100 transition-colors disabled:opacity-50"
           >
-            {testResult.success ? (
-              <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
-            ) : (
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-            )}
-            <span>{testResult.message}</span>
-          </div>
+            <Crosshair className="w-3.5 h-3.5" />
+            {isLocating ? 'Finding your location…' : 'Use my current location'}
+          </button>
+          <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
+            Uses precise browser coordinates for a closer local weather estimate. Location access is optional.
+          </p>
+        </div>
+        {locationError && (
+          <p role="alert" className="mt-3 text-xs text-red-700 dark:text-red-300">
+            {locationError}
+          </p>
         )}
       </div>
+
+      <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
+        {weather?.source === 'live'
+          ? `Live ${weather.provider ?? 'weather API'} data${weather.latitude !== undefined && weather.longitude !== undefined ? ` · coordinates ${weather.latitude.toFixed(2)}, ${weather.longitude.toFixed(2)}` : ''}.${weather.provider === 'Open-Meteo' ? ' Model estimates can differ from a nearby personal weather station.' : ''}`
+          : 'Showing simulated weather because live data is unavailable.'}{' '}
+        <a
+          href="https://open-meteo.com/"
+          target="_blank"
+          rel="noreferrer"
+          className="underline underline-offset-2 hover:text-neutral-700 dark:hover:text-neutral-200"
+        >
+          Weather data by Open-Meteo
+        </a>
+      </p>
+
+      {currentUser?.role === 'admin' && (
+        <div className="bg-white dark:bg-neutral-900 rounded-3xl border border-neutral-200/80 dark:border-neutral-800/80 p-6 sm:p-7 shadow-xs">
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-base font-bold text-neutral-900 dark:text-neutral-100">
+              Weather API Connection
+            </h2>
+            <span className="text-xs px-2.5 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 font-medium">
+              Free Live Feed
+            </span>
+          </div>
+          <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-4">
+            Uses the free Open-Meteo weather API by default. You can leave this blank, or add an OpenWeather API key if you want to override it.
+          </p>
+
+          <form onSubmit={handleSaveAndTestKey} className="space-y-3">
+            <div className="relative">
+              <Key className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="password"
+                value={inputKey}
+                onChange={(e) => setInputKey(e.target.value)}
+                placeholder="Optional: OpenWeather key or leave blank for free Open-Meteo"
+                className="w-full pl-9 pr-3 py-2.5 text-xs rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-amber-500"
+              />
+            </div>
+
+            <div className="flex items-center justify-end">
+              <button
+                type="submit"
+                disabled={isTesting}
+                className="px-5 py-2 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-xs font-semibold hover:bg-neutral-800 dark:hover:bg-neutral-100 transition-colors disabled:opacity-50 cursor-pointer active:scale-95"
+              >
+                {isTesting ? 'Verifying...' : 'Save & Test Key'}
+              </button>
+            </div>
+          </form>
+
+          {testResult && (
+            <div
+              className={`mt-4 p-3 rounded-xl text-xs flex items-start gap-2 ${
+                testResult.success
+                  ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-900'
+                  : 'bg-red-50 dark:bg-red-950/40 text-red-800 dark:text-red-300 border border-red-200 dark:border-red-900'
+              }`}
+            >
+              {testResult.success ? (
+                <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+              ) : (
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              )}
+              <span>{testResult.message}</span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

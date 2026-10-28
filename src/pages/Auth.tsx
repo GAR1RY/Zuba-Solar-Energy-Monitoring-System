@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ArrowRight, Info, ShieldCheck, Lock, EyeOff, CheckCircle2, X, SunMedium } from 'lucide-react';
+import { ArrowRight, Info, ShieldCheck, Lock, EyeOff, CheckCircle2, X, SunMedium, Eye } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 interface AuthProps {
@@ -13,33 +13,38 @@ export const Auth: React.FC<AuthProps> = ({ onViewAbout }) => {
   // Form starts clean and empty as strictly specified
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [name, setName] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showPolicyModal, setShowPolicyModal] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
 
-    if (mode === 'login') {
-      const ok = login(email);
-      if (!ok) {
-        setErrorMsg('Invalid credentials or inactive account.');
+    try {
+      if (mode === 'login') {
+        const ok = await login(email, password);
+        if (!ok) {
+          setErrorMsg('Invalid email or password, or this account is inactive.');
+        }
+      } else {
+        if (!name.trim()) {
+          setErrorMsg('Please enter your full name.');
+          return;
+        }
+        if (password.length < 8) {
+          setErrorMsg('Choose a password with at least 8 characters.');
+          return;
+        }
+        const ok = await register(name, email, password);
+        if (!ok) {
+          setErrorMsg('An account with this email address already exists.');
+        }
       }
-    } else {
-      if (!name.trim()) {
-        setErrorMsg('Please enter your full name.');
-        return;
-      }
-      const ok = register(name, email);
-      if (!ok) {
-        setErrorMsg('An account with this email address already exists.');
-      }
+    } catch {
+      setErrorMsg('Could not complete sign-in. Please try again.');
     }
-  };
-
-  const handleQuickDemo = (demoEmail: string) => {
-    login(demoEmail);
   };
 
   return (
@@ -126,6 +131,7 @@ export const Auth: React.FC<AuthProps> = ({ onViewAbout }) => {
                 type="email"
                 required
                 placeholder="name@domain.com"
+                autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full px-3 py-2 text-xs rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-amber-500"
@@ -139,14 +145,26 @@ export const Auth: React.FC<AuthProps> = ({ onViewAbout }) => {
               <label className="block text-xs font-semibold text-neutral-700 dark:text-neutral-300 mb-1">
                 Password
               </label>
-              <input
-                type="password"
-                required
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2 text-xs rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-amber-500"
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  placeholder="••••••••"
+                  value={password}
+                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPassword((visible) => !visible)}
+                aria-pressed={showPassword}
+                className="mt-2 inline-flex items-center gap-1.5 text-xs text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200"
+              >
+                {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                <span>{showPassword ? 'Hide password' : 'Show password'}</span>
+              </button>
             </div>
 
             <button
@@ -187,25 +205,6 @@ export const Auth: React.FC<AuthProps> = ({ onViewAbout }) => {
                 </button>
               </p>
             )}
-          </div>
-        </div>
-
-        {/* Quiet testing options */}
-        <div className="mt-4 text-center">
-          <p className="text-[11px] text-neutral-400 mb-2">Instant demo sign-in options:</p>
-          <div className="flex items-center justify-center gap-2">
-            <button
-              onClick={() => handleQuickDemo('operator@zuba.energy')}
-              className="px-2.5 py-1 text-[11px] font-medium text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white bg-white/60 dark:bg-neutral-900/60 rounded-lg border border-neutral-200/60 dark:border-neutral-800/60 hover:bg-white dark:hover:bg-neutral-800 transition-colors cursor-pointer active:scale-95"
-            >
-              Operator Account
-            </button>
-            <button
-              onClick={() => handleQuickDemo('admin@zuba.energy')}
-              className="px-2.5 py-1 text-[11px] font-medium text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white bg-white/60 dark:bg-neutral-900/60 rounded-lg border border-neutral-200/60 dark:border-neutral-800/60 hover:bg-white dark:hover:bg-neutral-800 transition-colors cursor-pointer active:scale-95"
-            >
-              Admin Console
-            </button>
           </div>
         </div>
 

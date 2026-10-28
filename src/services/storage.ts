@@ -2,6 +2,7 @@ import { Alert, MaintenanceTask, MeterLog, Reading, SolarSystem, User, UserSetti
 
 const STORAGE_KEYS = {
   USERS: 'zuba_users_v2',
+  USER_PASSWORDS: 'zuba_user_passwords_v1',
   CURRENT_USER: 'zuba_current_user_v2',
   SYSTEMS: 'zuba_systems_v3', // new key so old seeded systems are removed
   SELECTED_SYSTEM_ID: 'zuba_selected_system_id_v2',
@@ -9,25 +10,6 @@ const STORAGE_KEYS = {
   MAINTENANCE_TASKS: 'zuba_maintenance_tasks_v2',
   SETTINGS: 'zuba_settings_v2',
 };
-
-const DEFAULT_USERS: User[] = [
-  {
-    id: 'usr_operator',
-    name: 'Solar Operator',
-    email: 'operator@zuba.energy',
-    role: 'user',
-    isActive: true,
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: 'usr_admin',
-    name: 'Administrator',
-    email: 'admin@zuba.energy',
-    role: 'admin',
-    isActive: true,
-    createdAt: new Date().toISOString(),
-  },
-];
 
 // No pre-seeded systems — completely clean space to add a new system
 const DEFAULT_SYSTEMS: SolarSystem[] = [];
@@ -77,10 +59,10 @@ export const storage = {
   getUsers(): User[] {
     const data = localStorage.getItem(STORAGE_KEYS.USERS);
     if (!data) {
-      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(DEFAULT_USERS));
-      return DEFAULT_USERS;
+      return [];
     }
-    return JSON.parse(data);
+    const users: User[] = JSON.parse(data);
+    return users.filter((user) => user.role === 'user' && user.id !== 'usr_operator' && user.id !== 'usr_admin');
   },
 
   saveUsers(users: User[]) {
@@ -88,21 +70,24 @@ export const storage = {
   },
 
   getCurrentUser(): User | null {
-    const data = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
-    if (!data) {
-      const initial = DEFAULT_USERS[0];
-      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(initial));
-      return initial;
-    }
-    return JSON.parse(data);
+    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+    return null;
   },
 
   setCurrentUser(user: User | null) {
-    if (user) {
-      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
-    } else {
-      localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
-    }
+    if (user) return;
+    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+  },
+
+  getUserPasswordHash(email: string): string | null {
+    const hashes = JSON.parse(localStorage.getItem(STORAGE_KEYS.USER_PASSWORDS) || '{}') as Record<string, string>;
+    return hashes[email] || null;
+  },
+
+  saveUserPasswordHash(email: string, passwordHash: string) {
+    const hashes = JSON.parse(localStorage.getItem(STORAGE_KEYS.USER_PASSWORDS) || '{}') as Record<string, string>;
+    hashes[email] = passwordHash;
+    localStorage.setItem(STORAGE_KEYS.USER_PASSWORDS, JSON.stringify(hashes));
   },
 
   getSystems(): SolarSystem[] {
