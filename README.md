@@ -21,14 +21,17 @@ The app starts signed out whenever the page is opened. Admin sign-in uses the co
 ### 3. Quick Start
 After downloading and extracting the `.zip` archive:
 
+Open a terminal in the extracted project folder. In **Windows PowerShell**, use `npm.cmd` so the command does not depend on PowerShell script execution policy:
+
+```powershell
+npm.cmd install
+npm.cmd run dev
+```
+
+In **Command Prompt, macOS, or Linux**, use:
+
 ```bash
-# 1. Open your terminal in the extracted project folder
-cd <extracted-folder>
-
-# 2. Install dependencies
 npm install
-
-# 3. Start the local development server
 npm run dev
 ```
 
