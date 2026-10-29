@@ -76,6 +76,7 @@ export interface MeterLog {
 
 export interface MaintenanceTask {
   id: string;
+  userId?: string;
   systemId: string;
   title: string;
   cycleDays: number; // Days after which task resets

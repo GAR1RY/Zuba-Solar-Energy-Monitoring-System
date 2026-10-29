@@ -6,7 +6,7 @@ import { inferSystemClass } from '../services/estimator';
 import { DEFAULT_PROVINCE, ZAMBIAN_PROVINCES, ZAMBIAN_LOCATIONS } from '../services/weather';
 
 export const Systems: React.FC = () => {
-  const { systems, addSystem, deleteSystem, currentSystem, setCurrentSystemId } = useApp();
+  const { systems, addSystem, deleteSystem, currentSystem, setCurrentSystemId, currentUser } = useApp();
 
   const [name, setName] = useState('');
   const [solarCount, setSolarCount] = useState<number>(8);
@@ -33,12 +33,12 @@ export const Systems: React.FC = () => {
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const cityCoords = ZAMBIAN_LOCATIONS[city] || ZAMBIAN_LOCATIONS[DEFAULT_PROVINCE];
 
-    const newSys = addSystem({
-      userId: 'usr_operator',
+    const newSys = await addSystem({
+      userId: currentUser?.id || '',
       name: name.trim() || `${city} ${systemClass} Space`,
       panelCount: solarCount,
       panelWattage: 450,
@@ -54,6 +54,7 @@ export const Systems: React.FC = () => {
       systemClass,
     });
 
+    if (!newSys) return;
     setSuccessNotice(`System "${newSys.name}" added successfully with ${newSys.panelCount} solars.`);
     setName('');
     setSolarCount(8);

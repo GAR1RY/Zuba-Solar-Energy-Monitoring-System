@@ -1,6 +1,7 @@
 import React from 'react';
 import { Menu, ChevronDown } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { ThemeToggleButton } from './ThemeToggleButton';
 
 interface HeaderProps {
   onOpenSidebar: () => void;
@@ -52,6 +53,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSidebar, activeTitle }) =>
 
       {/* Right side live status */}
       <div className="flex items-center gap-2 sm:gap-3 text-xs">
+        <ThemeToggleButton />
         {liveReading && (
           <div className="hidden sm:flex items-center gap-2 text-neutral-500 dark:text-neutral-400">
             <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500" />

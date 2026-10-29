@@ -24,15 +24,19 @@ export const Admin: React.FC = () => {
     );
   }
 
-  const handleSaveTariff = (event: React.FormEvent) => {
+  const handleSaveTariff = async (event: React.FormEvent) => {
     event.preventDefault();
     const tariff = Number(tariffInput);
     if (!Number.isFinite(tariff) || tariff < 0 || tariff > 1000) {
       setTariffMessage('Enter a tariff between K0 and K1,000 per kWh.');
       return;
     }
-    updateSettings({ tariffZmw: tariff });
-    setTariffMessage('Tariff updated. Savings estimates now use this rate.');
+    const saved = await updateSettings({ tariffZmw: tariff });
+    setTariffMessage(
+      saved
+        ? 'Tariff updated. Savings estimates now use this rate.'
+        : 'Could not save the tariff. Please try again.'
+    );
   };
 
   return (

@@ -27,7 +27,7 @@ const TAB_TITLES: Record<string, string> = {
 };
 
 function MainApp() {
-  const { currentUser } = useApp();
+  const { currentUser, isLoading, apiError, clearApiError } = useApp();
   const [activeTab, setActiveTab] = useState<string>('home');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [viewingPublicAbout, setViewingPublicAbout] = useState(false);
@@ -37,6 +37,14 @@ function MainApp() {
   useEffect(() => {
     mainContentRef.current?.scrollTo({ top: 0, behavior: 'instant' });
   }, [activeTab]);
+
+  if (isLoading) {
+    return (
+      <div className="fixed inset-0 flex items-center justify-center bg-neutral-50 dark:bg-neutral-950 text-sm text-neutral-500 dark:text-neutral-400">
+        Connecting to Zuba…
+      </div>
+    );
+  }
 
   // If not signed in and not viewing public About
   if (!currentUser && !viewingPublicAbout) {
@@ -84,6 +92,18 @@ function MainApp() {
           onOpenSidebar={() => setIsSidebarOpen(true)}
           activeTitle={TAB_TITLES[activeTab] || 'Zuba'}
         />
+
+        {apiError && (
+          <div
+            role="alert"
+            className="mx-4 mt-4 flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200 sm:mx-8"
+          >
+            <span>{apiError}</span>
+            <button type="button" onClick={clearApiError} className="font-semibold underline">
+              Dismiss
+            </button>
+          </div>
+        )}
 
         {/* Dedicated scrollable dashboard container - keeps background completely still */}
         <main

@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { ArrowRight, Info, ShieldCheck, Lock, EyeOff, CheckCircle2, X, SunMedium, Eye } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { ThemeToggleButton } from '../components/layout/ThemeToggleButton';
 
 interface AuthProps {
   onViewAbout: () => void;
 }
 
 export const Auth: React.FC<AuthProps> = ({ onViewAbout }) => {
-  const { login, register } = useApp();
+  const { login, register, apiError, clearApiError } = useApp();
 
   const [mode, setMode] = useState<'login' | 'register'>('login');
   // Form starts clean and empty as strictly specified
@@ -21,6 +22,7 @@ export const Auth: React.FC<AuthProps> = ({ onViewAbout }) => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
+    clearApiError();
 
     try {
       if (mode === 'login') {
@@ -42,13 +44,16 @@ export const Auth: React.FC<AuthProps> = ({ onViewAbout }) => {
           setErrorMsg('An account with this email address already exists.');
         }
       }
-    } catch {
-      setErrorMsg('Could not complete sign-in. Please try again.');
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : 'Could not complete sign-in. Please try again.');
     }
   };
 
   return (
     <div className="fixed inset-0 h-screen h-[100dvh] overflow-y-auto overscroll-contain flex flex-col items-center justify-center p-4 bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100">
+      <div className="absolute top-4 right-4">
+        <ThemeToggleButton />
+      </div>
       <div className="w-full max-w-sm my-auto">
         {/* Brand Lockup with Clean, Uniform Amber State */}
         <div className="text-center mb-7">
@@ -90,9 +95,9 @@ export const Auth: React.FC<AuthProps> = ({ onViewAbout }) => {
             </button>
           </div>
 
-          {errorMsg && (
+          {(apiError || errorMsg) && (
             <div className="mb-4 p-2.5 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 text-xs text-red-700 dark:text-red-300">
-              {errorMsg}
+              {apiError || errorMsg}
             </div>
           )}
 
@@ -137,7 +142,7 @@ export const Auth: React.FC<AuthProps> = ({ onViewAbout }) => {
                 className="w-full px-3 py-2 text-xs rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-amber-500"
               />
               <p className="mt-1 text-[11px] text-neutral-400 dark:text-neutral-500">
-                Your email is stored locally and will never be shared, sold, or spammed.
+                Your email is stored in this app's local database and will never be sold or used for marketing.
               </p>
             </div>
 
@@ -265,10 +270,10 @@ export const Auth: React.FC<AuthProps> = ({ onViewAbout }) => {
               <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-800/40 border border-neutral-200/60 dark:border-neutral-800/60 space-y-1.5">
                 <div className="flex items-center gap-2 font-bold text-neutral-900 dark:text-neutral-100">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                  <span>2. Local Storage & Physical Device Ownership</span>
+                  <span>2. Local SQLite Database & Device Storage</span>
                 </div>
                 <p className="text-neutral-600 dark:text-neutral-300 text-xs pl-6">
-                  All solar system telemetry, hardware sizing specifications, meter logs, and user credentials reside directly in your browser's private local storage (<code className="px-1 py-0.5 rounded bg-neutral-200/60 dark:bg-neutral-700/60 font-mono text-[11px]">localStorage</code>). Your data stays on your machine under your direct physical custody.
+                  Solar system details, meter logs, maintenance tasks, settings, and password hashes are stored in the app's SQLite database on the computer running Zuba. The default setup keeps this database on this PC and does not sync it to a cloud service.
                 </p>
               </div>
 

@@ -153,7 +153,7 @@ async function fetchOpenMeteoWeather(
 
   try {
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,cloud_cover,weather_code,uv_index&timezone=auto&forecast_days=1`;
-    const response = await fetch(url, { signal: controller.signal });
+    const response = await fetch(url, { signal: controller.signal, cache: 'no-store' });
     if (!response.ok) return null;
 
     const data = await response.json();
@@ -202,7 +202,7 @@ export async function fetchWeather(
         ? `lat=${latitude}&lon=${longitude}`
         : `q=${encodeURIComponent(cleanLoc.replace(' Province', ''))},ZM`;
       const url = `https://api.openweathermap.org/data/2.5/weather?${locationQuery}&units=metric&appid=${apiKey.trim()}`;
-      const response = await fetch(url, { signal: controller.signal });
+      const response = await fetch(url, { signal: controller.signal, cache: 'no-store' });
       clearTimeout(timeoutId);
 
       if (response.ok) {

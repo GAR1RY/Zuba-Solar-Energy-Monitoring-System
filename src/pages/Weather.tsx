@@ -8,11 +8,25 @@ export const Weather: React.FC = () => {
 
   const [inputKey, setInputKey] = useState(settings.openWeatherApiKey || '');
   const [isTesting, setIsTesting] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const [isLocating, setIsLocating] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
 
   const activeLocation = weather?.city || currentSystem?.city || DEFAULT_PROVINCE;
+
+  const handleRefreshWeather = async () => {
+    setIsRefreshing(true);
+    setRefreshError(null);
+    try {
+      await refreshWeather(activeLocation);
+    } catch {
+      setRefreshError('Weather could not be refreshed. Please try again.');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   const handleLocationChange = async (location: string) => {
     setLocationError(null);
@@ -61,10 +75,18 @@ export const Weather: React.FC = () => {
     setTestResult(null);
 
     const trimmed = inputKey.trim();
-    updateSettings({ openWeatherApiKey: trimmed });
+    const saved = await updateSettings({ openWeatherApiKey: trimmed });
+    if (!saved) {
+      setTestResult({
+        success: false,
+        message: 'Could not save your weather settings. Please try again.',
+      });
+      setIsTesting(false);
+      return;
+    }
 
     try {
-      await refreshWeather(activeLocation);
+      await refreshWeather(activeLocation, undefined, trimmed);
       setTestResult({
         success: true,
         message: trimmed
@@ -95,13 +117,20 @@ export const Weather: React.FC = () => {
         </div>
 
         <button
-          onClick={() => refreshWeather(activeLocation)}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-neutral-200 dark:border-neutral-800 text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer active:scale-95"
+          type="button"
+          onClick={handleRefreshWeather}
+          disabled={isRefreshing}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-neutral-200 dark:border-neutral-800 text-xs font-semibold text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer active:scale-95 disabled:opacity-60 disabled:cursor-wait"
         >
-          <RefreshCw className="w-3.5 h-3.5" />
-          <span>Refresh Weather</span>
+          <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+          <span>{isRefreshing ? 'Refreshing…' : 'Refresh Weather'}</span>
         </button>
       </div>
+      {refreshError && (
+        <p role="alert" className="text-xs text-red-700 dark:text-red-300">
+          {refreshError}
+        </p>
+      )}
 
       {/* Weather Metric Cards - Plain minimal English */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -234,6 +263,7 @@ export const Weather: React.FC = () => {
         {weather?.source === 'live'
           ? `Live ${weather.provider ?? 'weather API'} data${weather.latitude !== undefined && weather.longitude !== undefined ? ` · coordinates ${weather.latitude.toFixed(2)}, ${weather.longitude.toFixed(2)}` : ''}.${weather.provider === 'Open-Meteo' ? ' Model estimates can differ from a nearby personal weather station.' : ''}`
           : 'Showing simulated weather because live data is unavailable.'}{' '}
+        {weather && `Updated ${new Date(weather.timestamp).toLocaleTimeString()}. `}
         <a
           href="https://open-meteo.com/"
           target="_blank"

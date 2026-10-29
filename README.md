@@ -1,96 +1,113 @@
-# Zuba — Solar Energy & Storage Monitoring System
+# Zuba Solar Energy Monitoring System
 
-Zuba is an open-source, web-based photovoltaic and energy storage monitoring platform designed with a calm, restrained interface. It provides solar owners and commercial facility operators with clear visibility into electrical generation, battery storage, and scheduled maintenance.
+Zuba is a local web application for monitoring solar installations, energy readings, weather, meter logs, and maintenance tasks. The React interface communicates with a Python API, which stores account and application data in a SQLite database on this PC.
 
----
+## Project structure
 
-## Running Locally on Localhost (Zip Download)
+| Area | Location | Purpose |
+|---|---|---|
+| Frontend | `src/` | React and TypeScript pages, components, and browser-side application logic |
+| Web/API launcher | `server.ts` | Starts the Python API and serves the frontend; proxies `/api` requests |
+| Backend | `backend/app.py` | Flask API, sign-in, and database operations |
+| Database schema | `backend/schema.sql` | Tables and relationships created for the SQLite database |
+| Backend tests | `backend/test_app.py` | Automated tests for the API and data persistence |
+| Windows startup | `scripts/` | Installs or removes the current user's automatic-start shortcut |
 
-This application is completely self-contained and works out of the box on `localhost` without requiring any cloud databases or external API keys.
+## Frontend
 
-### 1. Prerequisites
-- **Node.js** (version 18, 20, or newer recommended)
-- **npm** (included with Node.js)
+- **React and TypeScript** provide the user interface.
+- **Vite** runs the development server and builds the production frontend.
+- The frontend sends application requests to the Python API; it does not use browser storage as the main database.
+- The solar assistant uses local rules and the selected system's readings. It does not require a Gemini API key.
 
-### 2. Configure Admin Sign-In
+## Backend and database
 
-Admin access is verified by the local server. Copy `.env.example` to `.env`, then set a unique, strong `ZUBA_ADMIN_PASSWORD`. The default admin email is `garrymapulanga@gmail.com`; `ZUBA_ADMIN_NAME` and `ZUBA_ADMIN_EMAIL` can be customized in `.env`. Do not commit `.env` or share the password.
+- **Python 3.10+ and Flask** provide the local API.
+- **SQLite** stores accounts, settings, solar systems, meter logs, and maintenance tasks in `backend/instance/zuba.db`.
+- Python includes SQLite support, so no separate SQL server or database application needs to be installed. The app creates the database and tables automatically.
+- By default, the services listen on this PC only. The app is not configured for access from other devices or for public hosting.
+- Earlier data kept only in the browser is not imported automatically.
 
-The app starts signed out whenever the page is opened. Admin sign-in uses the configured admin email and password; no admin/demo button is shown. Regular operator accounts are created with an email and password and remain stored locally in that browser.
+## Requirements
 
-### 3. Quick Start
-After downloading and extracting the `.zip` archive:
+- Windows
+- Python 3.10 or later
+- Node.js 20 or later, including npm
 
-Open a terminal in the extracted project folder. In **Windows PowerShell**, use `npm.cmd` so the command does not depend on PowerShell script execution policy:
+## Install and run
+
+Open PowerShell in the project folder.
+
+1. Install the Python API dependencies:
+
+   ```powershell
+   python -m pip install -r backend\requirements.txt
+   ```
+
+2. Create a local environment file if you do not already have one:
+
+   ```powershell
+   Copy-Item .env.example .env
+   ```
+
+   Set a strong `ZUBA_ADMIN_PASSWORD` in `.env`. The admin name and email can be set with `ZUBA_ADMIN_NAME` and `ZUBA_ADMIN_EMAIL`. Do not share or commit `.env`.
+
+3. Install frontend and launcher dependencies:
+
+   ```powershell
+   npm.cmd install
+   ```
+
+4. Start the development app:
+
+   ```powershell
+   npm.cmd run dev
+   ```
+
+5. Open [http://127.0.0.1:3000](http://127.0.0.1:3000).
+
+The launcher starts the Python API along with the frontend. Sign in with the configured admin account or create an operator account.
+
+## Start automatically when signing in
+
+After installing the requirements above, run this once from the project folder:
 
 ```powershell
-npm.cmd install
-npm.cmd run dev
+.\scripts\install-startup.ps1
 ```
 
-In **Command Prompt, macOS, or Linux**, use:
+The installer adds a shortcut to the current Windows user's Startup folder. At sign-in, it starts the production app in the background and opens it in your browser when ready. The app only runs while the PC is on and you are signed in. Startup logs are saved under `%LOCALAPPDATA%\ZubaSolar\logs`.
 
-```bash
-npm install
-npm run dev
+To remove automatic startup without removing app files or data:
+
+```powershell
+.\scripts\install-startup.ps1 -Remove
 ```
 
-### 4. Open in Browser
-Visit **`http://localhost:3000`** in your browser.
+## Build and run the production frontend
 
-- **Sign-In**: Sign in with an existing operator account or create one. Admin credentials are configured separately in the server `.env` file.
-- **Local Persistence**: Data (solar systems, real meter logs, maintenance cycles, and theme preference) is automatically stored in your browser's `localStorage`.
-- **Zero Config Required**: Weather simulation across the Provinces of Zambia runs locally without requiring an OpenWeather API key. If you have an OpenWeather key, you can optionally connect it in Weather Telemetry.
-- **Solar AI Intelligence**: System-grounded predictions for battery 100% full charge time, morning vs daytime generation, and night energy storage balance. Runs locally with zero setup and connects to Gemini when an API key is available.
-
----
-
-## Production Build & Preview
-
-To verify a production build on localhost:
-
-```bash
-# Build the project
-npm run build
-
-# Preview the production build locally
-npm run preview
+```powershell
+npm.cmd run build
+$env:NODE_ENV = 'production'
+npm.cmd start
 ```
 
----
+Open [http://127.0.0.1:3000](http://127.0.0.1:3000). The startup installer also builds the frontend if the production build is missing.
 
-## System Architecture & Features
+## Data backup
 
-1. **Light & Dark Mode**:
-   - Native light and dark mode toggling from the Header, Sidebar, or Settings.
-   - Automatically respects system appearance preference.
+Stop the app before copying `backend/instance/zuba.db` to a safe location. Keep the `.session_secret` file in the same folder when restoring the database; it preserves existing sign-in sessions. The database and secret are local data and must not be committed to Git.
 
-2. **Solar Systems by Solar Panel Count**:
-   - Clean space to add and configure solar installations.
-   - Categorized by the physical count of solar modules:
-     - **Residential Space**: 1 to 8 solars
-     - **Commercial Space**: 9 to 24 solars
-     - **Industrial Space**: 25+ solars
+## Tests and checks
 
-3. **Weather Telemetry & Nine Provinces**:
-   - **Zambia Overall** as the national baseline station.
-   - All 9 provinces of Zambia: Central, Copperbelt, Eastern, Luapula, Lusaka, Northern, North-Western, Southern, and Western.
-   - Weather Duration guide in the "About" section explaining how duration directly drives stored kilowatt-hours ($E = P \times t$).
+Run these commands from the project folder:
 
-4. **Scheduled Maintenance Checklist**:
-   - Clean, cyclical maintenance tracking (30, 60, 90 day intervals).
-   - Reset tasks for the next cycle upon completion.
+```powershell
+npm.cmd run lint
+npm.cmd run build
+python -m unittest backend.test_app
+```
 
-5. **Dedicated Maintenance Alerts**:
-   - Alerts trigger exclusively when maintenance tasks are pending or overdue.
-   - Directly resolve and cycle tasks from the alerts tab.
+## Weather
 
-6. **Live Telemetry & Street Meter Reconciliation**:
-   - Continuous power flow between panels, battery bank, facility load, and utility grid.
-   - Daily inverter/counter meter audit trail with stochastic gradient descent calibration.
-
----
-
-## License
-
-MIT License. Open source for clean energy monitoring.
+Weather data is retrieved through the application's weather service. An optional OpenWeather API key can be configured in Weather Telemetry; no weather key is required for the built-in weather source.

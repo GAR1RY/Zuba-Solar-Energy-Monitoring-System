@@ -33,7 +33,7 @@ export const MeterHistory: React.FC = () => {
       )
     : 0;
 
-  const handleRecord = (e: React.FormEvent) => {
+  const handleRecord = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
     if (isNaN(numGenerated) || numGenerated <= 0) {
@@ -41,13 +41,14 @@ export const MeterHistory: React.FC = () => {
       return;
     }
 
-    const res = recordMeterReading({
+    const res = await recordMeterReading({
       date,
       totalGenerationKwh: numGenerated,
       consumedKwh: 0,
       eveningRemainingKwh: 0,
     });
 
+    if (!res) return;
     setFeedback(res);
     setTotalGenerationKwh('');
 

@@ -1,27 +1,45 @@
-import React, { createContext, useContext, useEffect, useState, useMemo, useCallback } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Alert, MaintenanceTask, MeterLog, Reading, SolarSystem, User, UserSettings, WeatherSnapshot } from '../types';
-import { storage } from '../services/storage';
-import { calculateExpectedDailyKwh, tuneCorrectionFactor } from '../services/estimator';
+import { apiRequest, setCsrfToken } from '../services/api';
+import { calculateExpectedDailyKwh } from '../services/estimator';
 import { fetchWeather, WeatherCoordinates } from '../services/weather';
+
+interface BootstrapResponse {
+  user: User;
+  allUsers: User[];
+  systems: SolarSystem[];
+  selectedSystemId: string;
+  settings: UserSettings;
+  meterLogs: MeterLog[];
+  maintenanceTasks: MaintenanceTask[];
+}
+
+interface SessionResponse {
+  user: User | null;
+  csrfToken: string;
+}
 
 interface AppContextType {
   currentUser: User | null;
   allUsers: User[];
+  isLoading: boolean;
+  apiError: string | null;
+  clearApiError: () => void;
   login: (email: string, password: string) => Promise<boolean>;
   register: (name: string, email: string, password: string) => Promise<boolean>;
-  logout: () => void;
+  logout: () => Promise<void>;
   toggleUserStatus: (userId: string) => void;
   deleteUser: (userId: string) => void;
 
   systems: SolarSystem[];
   currentSystem: SolarSystem | null;
   setCurrentSystemId: (id: string) => void;
-  addSystem: (system: Omit<SolarSystem, 'id' | 'createdAt' | 'apiKey'>) => SolarSystem;
+  addSystem: (system: Omit<SolarSystem, 'id' | 'createdAt' | 'apiKey'>) => Promise<SolarSystem | null>;
   updateSystem: (id: string, updates: Partial<SolarSystem>) => void;
   deleteSystem: (id: string) => void;
 
   weather: WeatherSnapshot | null;
-  refreshWeather: (city?: string, coordinates?: WeatherCoordinates | null) => Promise<void>;
+  refreshWeather: (city?: string, coordinates?: WeatherCoordinates | null, apiKeyOverride?: string) => Promise<void>;
 
   liveReading: Reading | null;
   triggerLiveTick: () => void;
@@ -43,7 +61,7 @@ interface AppContextType {
     legacyMorning?: number,
     legacyEvening?: number,
     legacyNote?: string
-  ) => { delta: number; newFactor: number; totalDayKwh: number; netKwh: number };
+  ) => Promise<{ delta: number; newFactor: number; totalDayKwh: number; netKwh: number } | null>;
 
   maintenanceTasks: MaintenanceTask[];
   toggleMaintenanceTask: (taskId: string) => void;
@@ -53,40 +71,113 @@ interface AppContextType {
   alerts: Alert[];
 
   settings: UserSettings;
-  updateSettings: (updates: Partial<UserSettings>) => void;
+  updateSettings: (updates: Partial<UserSettings>) => Promise<boolean>;
   toggleTheme: () => void;
 
   showWelcomeModal: boolean;
   setShowWelcomeModal: (show: boolean) => void;
 }
 
+const DEFAULT_SETTINGS: UserSettings = {
+  theme: 'system',
+  tariffZmw: 2.5,
+  openWeatherApiKey: '',
+  hasDismissedWelcomeGuide: true,
+};
+
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
+function messageFromError(error: unknown): string {
+  return error instanceof Error ? error.message : 'The server request failed. Please try again.';
+}
+
+function createLiveReading(system: SolarSystem, weather: WeatherSnapshot): Reading {
+  const now = new Date();
+  const catHour = (now.getUTCHours() + 2 + now.getUTCMinutes() / 60) % 24;
+  const ratedKw = (system.panelCount * (system.panelWattage || 450)) / 1000;
+  let generationKw = 0;
+  let expectedKw = 0;
+
+  if (catHour >= 6 && catHour <= 18) {
+    const altitude = Math.sin(((catHour - 6) / 12) * Math.PI);
+    const cloudFactor = Math.max(0.2, 1 - (weather.cloudCover / 100) * 0.75);
+    const safeFactor = system.correctionFactor > 0 ? system.correctionFactor : 1;
+    generationKw = Number((ratedKw * altitude * cloudFactor * safeFactor).toFixed(2));
+    expectedKw = Number((ratedKw * altitude).toFixed(2));
+  }
+
+  const baseLoad = ratedKw * 0.28;
+  const consumptionKw = Number(Math.max(0.25, baseLoad * (0.9 + Math.random() * 0.2)).toFixed(2));
+  const netPower = generationKw - consumptionKw;
+  const batteryPercent = netPower >= 0
+    ? Math.min(100, 70 + (netPower / (ratedKw || 1)) * 25)
+    : Math.max(22, 75 - (Math.abs(netPower) / (ratedKw || 1)) * 20);
+  const gridKw = Number((netPower > 0 ? netPower * 0.4 : netPower * 0.6).toFixed(2));
+
+  return {
+    id: `read_${Date.now()}`,
+    systemId: system.id,
+    timestamp: now.toISOString(),
+    generationKw,
+    consumptionKw,
+    batteryPercent: Number(batteryPercent.toFixed(1)),
+    gridKw,
+    expectedKw,
+  };
+}
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [currentUser, setCurrentUser] = useState<User | null>(() => storage.getCurrentUser());
-  const [allUsers, setAllUsers] = useState<User[]>(() => storage.getUsers());
-  const [systems, setSystems] = useState<SolarSystem[]>(() => storage.getSystems());
-  const [selectedSystemId, setSelectedSystemId] = useState<string>(() => storage.getSelectedSystemId());
-  const [settings, setSettings] = useState<UserSettings>(() => storage.getSettings());
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [allUsers, setAllUsers] = useState<User[]>([]);
+  const [systems, setSystems] = useState<SolarSystem[]>([]);
+  const [selectedSystemId, setSelectedSystemId] = useState('');
+  const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
   const [weather, setWeather] = useState<WeatherSnapshot | null>(null);
   const [weatherCoordinates, setWeatherCoordinates] = useState<WeatherCoordinates | null>(null);
   const [liveReading, setLiveReading] = useState<Reading | null>(null);
-  const [meterLogs, setMeterLogs] = useState<MeterLog[]>(() => storage.getMeterLogs());
-  const [maintenanceTasks, setMaintenanceTasks] = useState<MaintenanceTask[]>(() => storage.getMaintenanceTasks());
-  const [showWelcomeModal, setShowWelcomeModal] = useState<boolean>(false);
+  const [meterLogs, setMeterLogs] = useState<MeterLog[]>([]);
+  const [maintenanceTasks, setMaintenanceTasks] = useState<MaintenanceTask[]>([]);
+  const [showWelcomeModal, setShowWelcomeModal] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [apiError, setApiError] = useState<string | null>(null);
 
-  // Alerts are derived strictly from maintenance tasks (as requested)
-  const alerts = useMemo(() => {
-    return storage.getAlerts();
-  }, [maintenanceTasks]);
+  const syncFromServer = useCallback(async () => {
+    const session = await apiRequest<SessionResponse>('/api/session');
+    setCsrfToken(session.csrfToken);
+    if (!session.user) {
+      setCurrentUser(null);
+      setAllUsers([]);
+      setSystems([]);
+      setSelectedSystemId('');
+      setSettings(DEFAULT_SETTINGS);
+      setMeterLogs([]);
+      setMaintenanceTasks([]);
+      setWeather(null);
+      setLiveReading(null);
+      return;
+    }
 
-  // Sync theme to DOM
+    const data = await apiRequest<BootstrapResponse>('/api/bootstrap');
+    setCurrentUser(data.user);
+    setAllUsers(data.allUsers);
+    setSystems(data.systems);
+    setSelectedSystemId(data.selectedSystemId);
+    setSettings(data.settings);
+    setMeterLogs(data.meterLogs);
+    setMaintenanceTasks(data.maintenanceTasks);
+  }, []);
+
+  useEffect(() => {
+    syncFromServer()
+      .catch((error: unknown) => setApiError(messageFromError(error)))
+      .finally(() => setIsLoading(false));
+  }, [syncFromServer]);
+
   useEffect(() => {
     const applyTheme = (theme: 'system' | 'light' | 'dark') => {
       const isDark =
         theme === 'dark' ||
         (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-
       const root = document.documentElement;
       if (isDark) {
         root.classList.add('dark');
@@ -102,7 +193,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     applyTheme(settings.theme);
-
     if (settings.theme === 'system') {
       const media = window.matchMedia('(prefers-color-scheme: dark)');
       const listener = () => applyTheme('system');
@@ -111,208 +201,148 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [settings.theme]);
 
-  const toggleTheme = useCallback(() => {
-    const isCurrentlyDark =
-      settings.theme === 'dark' ||
-      (settings.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-    const nextTheme: 'light' | 'dark' = isCurrentlyDark ? 'light' : 'dark';
-    const updated = { ...settings, theme: nextTheme };
-    setSettings(updated);
-    storage.saveSettings(updated);
-  }, [settings]);
-
-  // Active solar system
   const accessibleSystems = useMemo(() => {
     if (!currentUser) return [];
     if (currentUser.role === 'admin') return systems;
-    return systems.filter((s) => s.userId === currentUser.id);
+    return systems.filter((system) => system.userId === currentUser.id);
   }, [currentUser, systems]);
 
   const currentSystem = useMemo(() => {
     if (accessibleSystems.length === 0) return null;
-    const found = accessibleSystems.find((s) => s.id === selectedSystemId);
-    return found || accessibleSystems[0];
+    return accessibleSystems.find((system) => system.id === selectedSystemId) || accessibleSystems[0];
   }, [accessibleSystems, selectedSystemId]);
 
-  // Refresh weather
-  const refreshWeather = useCallback(async (cityOverride?: string, coordinates?: WeatherCoordinates | null) => {
-    const targetCity = cityOverride || (currentSystem ? currentSystem.city : 'Lusaka');
-    const targetCoordinates = coordinates === undefined ? weatherCoordinates : coordinates;
-    if (coordinates !== undefined) {
-      setWeatherCoordinates(coordinates);
+  const runMutation = useCallback(async <T,>(
+    path: string,
+    options: RequestInit
+  ): Promise<T | null> => {
+    try {
+      const result = await apiRequest<T>(path, options);
+      await syncFromServer();
+      setApiError(null);
+      return result;
+    } catch (error) {
+      setApiError(messageFromError(error));
+      return null;
     }
-    const snap = await fetchWeather(targetCity, settings.openWeatherApiKey, targetCoordinates);
-    setWeather(snap);
+  }, [syncFromServer]);
+
+  const login = async (email: string, password: string): Promise<boolean> => {
+    try {
+      const response = await apiRequest<SessionResponse>('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      });
+      setCsrfToken(response.csrfToken);
+      await syncFromServer();
+      setApiError(null);
+      return true;
+    } catch (error) {
+      setApiError(messageFromError(error));
+      return false;
+    }
+  };
+
+  const register = async (name: string, email: string, password: string): Promise<boolean> => {
+    try {
+      const response = await apiRequest<SessionResponse>('/api/auth/register', {
+        method: 'POST',
+        body: JSON.stringify({ name, email, password }),
+      });
+      setCsrfToken(response.csrfToken);
+      await syncFromServer();
+      setApiError(null);
+      return true;
+    } catch (error) {
+      setApiError(messageFromError(error));
+      return false;
+    }
+  };
+
+  const logout = async () => {
+    const result = await runMutation<{ ok: boolean }>('/api/auth/logout', { method: 'POST' });
+    if (result) {
+      setApiError(null);
+      setWeatherCoordinates(null);
+    }
+  };
+
+  const toggleUserStatus = (userId: string) => {
+    const user = allUsers.find((item) => item.id === userId);
+    if (!user) return;
+    void runMutation(`/api/admin/users/${encodeURIComponent(userId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ isActive: !user.isActive }),
+    });
+  };
+
+  const deleteUser = (userId: string) => {
+    void runMutation(`/api/admin/users/${encodeURIComponent(userId)}`, { method: 'DELETE' });
+  };
+
+  const setCurrentSystem = (id: string) => {
+    void runMutation('/api/systems/select', {
+      method: 'POST',
+      body: JSON.stringify({ systemId: id }),
+    });
+  };
+
+  const addSystem = async (
+    newSystemData: Omit<SolarSystem, 'id' | 'createdAt' | 'apiKey'>
+  ): Promise<SolarSystem | null> => {
+    const result = await runMutation<{ system: SolarSystem }>('/api/systems', {
+      method: 'POST',
+      body: JSON.stringify(newSystemData),
+    });
+    return result?.system ?? null;
+  };
+
+  const updateSystem = (id: string, updates: Partial<SolarSystem>) => {
+    void runMutation(`/api/systems/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(updates),
+    });
+  };
+
+  const deleteSystem = (id: string) => {
+    void runMutation(`/api/systems/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  };
+
+  const refreshWeather = useCallback(async (
+    cityOverride?: string,
+    coordinates?: WeatherCoordinates | null,
+    apiKeyOverride?: string
+  ) => {
+    const targetCity = cityOverride || currentSystem?.city || 'Lusaka Province';
+    const targetCoordinates = coordinates === undefined ? weatherCoordinates : coordinates;
+    if (coordinates !== undefined) setWeatherCoordinates(coordinates);
+    const snapshot = await fetchWeather(
+      targetCity,
+      apiKeyOverride ?? settings.openWeatherApiKey,
+      targetCoordinates
+    );
+    setWeather(snapshot);
   }, [currentSystem, settings.openWeatherApiKey, weatherCoordinates]);
 
   useEffect(() => {
-    refreshWeather();
-    const interval = setInterval(() => {
-      refreshWeather();
-    }, 600000);
-    return () => clearInterval(interval);
-  }, [refreshWeather]);
+    if (!currentUser) return;
+    void refreshWeather();
+    const interval = window.setInterval(() => void refreshWeather(), 600000);
+    return () => window.clearInterval(interval);
+  }, [currentUser, refreshWeather]);
 
-  // Live telemetry generator tick
   const triggerLiveTick = useCallback(() => {
     if (!currentSystem || !weather) return;
-    const reading = storage.computeLiveReading(currentSystem, weather);
-    setLiveReading(reading);
+    setLiveReading(createLiveReading(currentSystem, weather));
   }, [currentSystem, weather]);
 
   useEffect(() => {
     triggerLiveTick();
-    const interval = setInterval(triggerLiveTick, 4000);
-    return () => clearInterval(interval);
+    const interval = window.setInterval(triggerLiveTick, 4000);
+    return () => window.clearInterval(interval);
   }, [triggerLiveTick]);
 
-  // Auth methods
-  const hashPassword = async (password: string): Promise<string> => {
-    const salt = crypto.getRandomValues(new Uint8Array(16));
-    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
-    const digest = await crypto.subtle.deriveBits(
-      { name: 'PBKDF2', salt, iterations: 210000, hash: 'SHA-256' },
-      key,
-      256
-    );
-    const toHex = (bytes: Uint8Array) => Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-    return `${toHex(salt)}:${toHex(new Uint8Array(digest))}`;
-  };
-
-  const login = async (email: string, password: string) => {
-    const cleanEmail = email.trim().toLowerCase();
-
-    try {
-      const response = await fetch('/api/auth/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail, password }),
-      });
-
-      if (response.ok) {
-        const adminUser = (await response.json()) as User;
-        setCurrentUser(adminUser);
-        setAllUsers((users) => [adminUser, ...users.filter((user) => user.email !== adminUser.email)]);
-        return true;
-      }
-
-      if (response.status !== 401) {
-        return false;
-      }
-    } catch {
-      // Local operator accounts can still sign in while the admin endpoint is unavailable.
-    }
-
-    const found = allUsers.find((u) => u.email.toLowerCase() === cleanEmail);
-    const passwordHash = storage.getUserPasswordHash(cleanEmail);
-    if (found && found.role === 'user' && found.isActive && passwordHash) {
-      const [saltHex, expectedHash] = passwordHash.split(':');
-      const salt = new Uint8Array(saltHex.match(/.{2}/g)?.map((byte) => parseInt(byte, 16)) || []);
-      const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
-      const digest = await crypto.subtle.deriveBits(
-        { name: 'PBKDF2', salt, iterations: 210000, hash: 'SHA-256' },
-        key,
-        256
-      );
-      const actualHash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
-      if (actualHash !== expectedHash) return false;
-      setCurrentUser(found);
-      return true;
-    }
-    return false;
-  };
-
-  const register = async (name: string, email: string, password: string) => {
-    const cleanEmail = email.trim().toLowerCase();
-    const existing = allUsers.find((u) => u.email.toLowerCase() === cleanEmail);
-    if (existing) {
-      if (existing.role !== 'user' || storage.getUserPasswordHash(cleanEmail)) return false;
-      storage.saveUserPasswordHash(cleanEmail, await hashPassword(password));
-      setCurrentUser(existing);
-      return true;
-    }
-
-    const newUser: User = {
-      id: `usr_${Date.now()}`,
-      name: name.trim(),
-      email: cleanEmail,
-      role: 'user',
-      isActive: true,
-      createdAt: new Date().toISOString(),
-    };
-
-    storage.saveUserPasswordHash(cleanEmail, await hashPassword(password));
-    const updatedUsers = [...allUsers, newUser];
-    setAllUsers(updatedUsers);
-    storage.saveUsers(updatedUsers);
-
-    setCurrentUser(newUser);
-
-    // No auto-seeded dummy system; start completely clean with space to add a system
-    return true;
-  };
-
-  const logout = () => {
-    setCurrentUser(null);
-  };
-
-  const toggleUserStatus = (userId: string) => {
-    const updated = allUsers.map((u) => {
-      if (u.id === userId && u.role !== 'admin') {
-        return { ...u, isActive: !u.isActive };
-      }
-      return u;
-    });
-    setAllUsers(updated);
-    storage.saveUsers(updated);
-  };
-
-  const deleteUser = (userId: string) => {
-    const target = allUsers.find((u) => u.id === userId);
-    if (!target || target.role === 'admin') return;
-    const updatedUsers = allUsers.filter((u) => u.id !== userId);
-    const updatedSystems = systems.filter((s) => s.userId !== userId);
-    setAllUsers(updatedUsers);
-    storage.saveUsers(updatedUsers);
-    setSystems(updatedSystems);
-    storage.saveSystems(updatedSystems);
-  };
-
-  // Systems management
-  const addSystem = (newSystemData: Omit<SolarSystem, 'id' | 'createdAt' | 'apiKey'>) => {
-    const newSys: SolarSystem = {
-      ...newSystemData,
-      id: `sys_${Date.now()}`,
-      apiKey: `zb_key_${Math.random().toString(36).substring(2, 12)}`,
-      createdAt: new Date().toISOString(),
-    };
-    const updated = [...systems, newSys];
-    setSystems(updated);
-    storage.saveSystems(updated);
-    setSelectedSystemId(newSys.id);
-    storage.setSelectedSystemId(newSys.id);
-    return newSys;
-  };
-
-  const updateSystem = (id: string, updates: Partial<SolarSystem>) => {
-    const updated = systems.map((s) => (s.id === id ? { ...s, ...updates } : s));
-    setSystems(updated);
-    storage.saveSystems(updated);
-  };
-
-  const deleteSystem = (id: string) => {
-    const updated = systems.filter((s) => s.id !== id);
-    setSystems(updated);
-    storage.saveSystems(updated);
-    if (selectedSystemId === id) {
-      const nextId = updated.length > 0 ? updated[0].id : '';
-      setSelectedSystemId(nextId);
-      storage.setSelectedSystemId(nextId);
-    }
-  };
-
-  // Record daily sunset meter reading + Real System calibration
-  const recordMeterReading = (
+  const recordMeterReading = async (
     paramsOrDate:
       | {
           date: string;
@@ -329,185 +359,156 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     legacyEvening?: number,
     legacyNote?: string
   ) => {
-    if (!currentSystem) return { delta: 0, newFactor: 1.0, totalDayKwh: 0, netKwh: 0 };
-
-    let date = '';
-    let totalDayKwh = 0;
-    let consumedKwh = 0;
-    let eveningRemainingKwh = 0;
-    let note = '';
-
-    if (typeof paramsOrDate === 'object') {
-      date = paramsOrDate.date;
-      if (paramsOrDate.totalGenerationKwh !== undefined) {
-        totalDayKwh = paramsOrDate.totalGenerationKwh;
-      } else if (paramsOrDate.totalDayGenerationKwh !== undefined) {
-        totalDayKwh = paramsOrDate.totalDayGenerationKwh;
-      } else {
-        totalDayKwh = (paramsOrDate.morningKwh || 0) + (paramsOrDate.daytimeKwh || 0);
-      }
-      consumedKwh = paramsOrDate.consumedKwh ?? 0;
-      eveningRemainingKwh = paramsOrDate.eveningRemainingKwh ?? 0;
-      note = paramsOrDate.note || '';
-    } else {
-      date = paramsOrDate;
-      const morningKwh = legacyMorning || 0;
-      const eveningReading = legacyEvening || morningKwh;
-      const diff = Math.max(0, eveningReading - morningKwh);
-      totalDayKwh = diff > 0 ? diff : morningKwh;
-      consumedKwh = totalDayKwh * 0.5;
-      eveningRemainingKwh = currentSystem.batteryCapacityKwh * 0.7;
-      note = legacyNote || '';
+    if (!currentSystem) {
+      return { delta: 0, newFactor: 1, totalDayKwh: 0, netKwh: 0 };
     }
 
-    totalDayKwh = Number(totalDayKwh.toFixed(2));
-    const netKwh = Number((totalDayKwh - consumedKwh).toFixed(2));
+    let payload: Record<string, unknown>;
+    if (typeof paramsOrDate === 'object') {
+      const totalGenerationKwh =
+        paramsOrDate.totalGenerationKwh ??
+        paramsOrDate.totalDayGenerationKwh ??
+        (paramsOrDate.morningKwh || 0) + (paramsOrDate.daytimeKwh || 0);
+      payload = {
+        date: paramsOrDate.date,
+        totalGenerationKwh,
+        consumedKwh: paramsOrDate.consumedKwh ?? 0,
+        eveningRemainingKwh: paramsOrDate.eveningRemainingKwh ?? 0,
+        note: paramsOrDate.note,
+      };
+    } else {
+      const morningKwh = legacyMorning || 0;
+      const eveningReading = legacyEvening || morningKwh;
+      const difference = Math.max(0, eveningReading - morningKwh);
+      payload = {
+        date: paramsOrDate,
+        totalGenerationKwh: difference > 0 ? difference : morningKwh,
+        consumedKwh: (difference > 0 ? difference : morningKwh) * 0.5,
+        eveningRemainingKwh: currentSystem.batteryCapacityKwh * 0.7,
+        note: legacyNote,
+      };
+    }
 
-    const clouds = weather ? weather.cloudCover : 20;
-    const temp = weather ? weather.temperatureC : 26;
-
-    const predicted = calculateExpectedDailyKwh(
-      currentSystem.panelCount,
-      currentSystem.panelWattage,
-      clouds,
-      temp,
-      currentSystem.correctionFactor
-    );
-
-    const delta = Number((totalDayKwh - predicted).toFixed(2));
-    const oldFactor = currentSystem.correctionFactor;
-    const newFactor = tuneCorrectionFactor(oldFactor, totalDayKwh, predicted);
-
-    updateSystem(currentSystem.id, { correctionFactor: newFactor });
-
-    const newLog: MeterLog = {
-      id: `log_${Date.now()}`,
-      systemId: currentSystem.id,
-      date,
-      totalDayGenerationKwh: totalDayKwh,
-      energyConsumedKwh: consumedKwh,
-      eveningRemainingKwh: eveningRemainingKwh,
-      netKwh,
-      predictedKwh: predicted,
-      deltaKwh: delta,
-      auditStatus: 'Calibrated',
-      note: note || `Sunset log · Tuned γ to ${newFactor.toFixed(4)}`,
-      morningReadingKwh: 0,
-      daytimeReadingKwh: totalDayKwh,
-      eveningReadingKwh: eveningRemainingKwh,
-    };
-
-    const updatedLogs = [newLog, ...meterLogs];
-    setMeterLogs(updatedLogs);
-    storage.saveMeterLogs(updatedLogs);
-
-    return { delta, newFactor, totalDayKwh, netKwh };
+    const result = await runMutation<{
+      result: { delta: number; newFactor: number; totalDayKwh: number; netKwh: number };
+    }>('/api/meter-logs', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...payload,
+        systemId: currentSystem.id,
+        cloudCover: weather?.cloudCover ?? 20,
+        temperatureC: weather?.temperatureC ?? 26,
+      }),
+    });
+    return result?.result ?? null;
   };
 
-  // Maintenance Checklist Actions & Resetting
   const toggleMaintenanceTask = (taskId: string) => {
-    const updated = maintenanceTasks.map((t) => {
-      if (t.id === taskId) {
-        const nextDone = !t.isDone;
-        return {
-          ...t,
-          isDone: nextDone,
-          lastCompletedAt: nextDone ? new Date().toISOString() : undefined,
-        };
-      }
-      return t;
+    const task = maintenanceTasks.find((item) => item.id === taskId);
+    if (!task) return;
+    void runMutation(`/api/maintenance/${encodeURIComponent(taskId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ action: 'toggle', isDone: !task.isDone }),
     });
-    setMaintenanceTasks(updated);
-    storage.saveMaintenanceTasks(updated);
   };
 
   const resetMaintenanceTask = (taskId: string) => {
-    const updated = maintenanceTasks.map((t) => {
-      if (t.id === taskId) {
-        const nextDue = new Date();
-        nextDue.setDate(nextDue.getDate() + (t.cycleDays || 30));
-        return {
-          ...t,
-          isDone: false,
-          dueDate: nextDue.toISOString().split('T')[0],
-          lastCompletedAt: undefined,
-        };
-      }
-      return t;
+    void runMutation(`/api/maintenance/${encodeURIComponent(taskId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ action: 'reset' }),
     });
-    setMaintenanceTasks(updated);
-    storage.saveMaintenanceTasks(updated);
   };
 
   const addMaintenanceTask = (title: string, cycleDays: number, dueDate: string) => {
-    const newTask: MaintenanceTask = {
-      id: `task_${Date.now()}`,
-      systemId: currentSystem?.id || '',
-      title,
-      cycleDays: cycleDays || 30,
-      dueDate,
-      isDone: false,
-    };
-    const updated = [newTask, ...maintenanceTasks];
-    setMaintenanceTasks(updated);
-    storage.saveMaintenanceTasks(updated);
+    void runMutation('/api/maintenance', {
+      method: 'POST',
+      body: JSON.stringify({
+        title,
+        cycleDays: cycleDays || 30,
+        dueDate,
+        systemId: currentSystem?.id || null,
+      }),
+    });
   };
 
-  // Settings
-  const updateSettings = (updates: Partial<UserSettings>) => {
+  const updateSettings = async (updates: Partial<UserSettings>) => {
     const permittedUpdates = { ...updates };
     if (currentUser?.role !== 'admin') {
       delete permittedUpdates.tariffZmw;
-      delete permittedUpdates.openWeatherApiKey;
     }
-    if (Object.keys(permittedUpdates).length === 0) return;
-
-    const updated = { ...settings, ...permittedUpdates };
-    setSettings(updated);
-    storage.saveSettings(updated);
+    if (Object.keys(permittedUpdates).length === 0) return false;
+    const result = await runMutation<{ ok: boolean }>('/api/settings', {
+      method: 'PATCH',
+      body: JSON.stringify(permittedUpdates),
+    });
+    return result?.ok ?? false;
   };
+
+  const toggleTheme = () => {
+    const isDark =
+      settings.theme === 'dark' ||
+      (settings.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    updateSettings({ theme: isDark ? 'light' : 'dark' });
+  };
+
+  const alerts = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return maintenanceTasks.flatMap((task): Alert[] => {
+      if (task.isDone) return [];
+      const due = new Date(`${task.dueDate}T00:00:00`);
+      const daysRemaining = Math.ceil((due.getTime() - today.getTime()) / 86400000);
+      if (daysRemaining > 7) return [];
+      const overdue = daysRemaining < 0;
+      const count = Math.abs(daysRemaining);
+      return [{
+        id: `${overdue ? 'alt_overdue' : 'alt_due'}_${task.id}`,
+        userId: currentUser?.id || task.userId || '',
+        systemId: task.systemId,
+        taskId: task.id,
+        type: overdue ? 'maintenance_overdue' : 'maintenance_due',
+        message: overdue
+          ? `Overdue Maintenance: "${task.title}" has not been performed (${count} day${count === 1 ? '' : 's'} past due).`
+          : `Pending Maintenance: "${task.title}" is due ${count === 0 ? 'today' : `in ${count} day${count === 1 ? '' : 's'}`}.`,
+        createdAt: new Date().toISOString(),
+        isRead: false,
+      }];
+    });
+  }, [currentUser, maintenanceTasks]);
 
   return (
     <AppContext.Provider
       value={{
         currentUser,
         allUsers,
+        isLoading,
+        apiError,
+        clearApiError: () => setApiError(null),
         login,
         register,
         logout,
         toggleUserStatus,
         deleteUser,
-
         systems,
         currentSystem,
-        setCurrentSystemId: (id) => {
-          setSelectedSystemId(id);
-          storage.setSelectedSystemId(id);
-        },
+        setCurrentSystemId: setCurrentSystem,
         addSystem,
         updateSystem,
         deleteSystem,
-
         weather,
         refreshWeather,
-
         liveReading,
         triggerLiveTick,
-
         meterLogs,
         recordMeterReading,
-
         maintenanceTasks,
         toggleMaintenanceTask,
         resetMaintenanceTask,
         addMaintenanceTask,
-
         alerts,
-
         settings,
         updateSettings,
         toggleTheme,
-
         showWelcomeModal,
         setShowWelcomeModal,
       }}
