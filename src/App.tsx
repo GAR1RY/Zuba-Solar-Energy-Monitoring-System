@@ -27,7 +27,7 @@ const TAB_TITLES: Record<string, string> = {
 };
 
 function MainApp() {
-  const { currentUser } = useApp();
+  const { currentUser, authLoading, syncError } = useApp();
   const [activeTab, setActiveTab] = useState<string>('home');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [viewingPublicAbout, setViewingPublicAbout] = useState(false);
@@ -37,6 +37,14 @@ function MainApp() {
   useEffect(() => {
     mainContentRef.current?.scrollTo({ top: 0, behavior: 'instant' });
   }, [activeTab]);
+
+  if (authLoading) {
+    return (
+      <div className="fixed inset-0 flex items-center justify-center bg-neutral-50 dark:bg-neutral-950 text-sm text-neutral-500 dark:text-neutral-400">
+        Connecting to Zuba…
+      </div>
+    );
+  }
 
   // If not signed in and not viewing public About
   if (!currentUser && !viewingPublicAbout) {
@@ -91,6 +99,11 @@ function MainApp() {
           tabIndex={-1}
           className="flex-1 overflow-y-auto overscroll-contain p-4 sm:p-8 focus:outline-none"
         >
+          {syncError && (
+            <div role="alert" className="max-w-6xl mx-auto mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
+              Database sync failed: {syncError}
+            </div>
+          )}
           {activeTab === 'home' && <Home onNavigate={(tab) => setActiveTab(tab)} />}
           {activeTab === 'systems' && <Systems />}
           {activeTab === 'weather' && <Weather />}

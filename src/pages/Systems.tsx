@@ -6,7 +6,7 @@ import { inferSystemClass } from '../services/estimator';
 import { DEFAULT_PROVINCE, ZAMBIAN_PROVINCES, ZAMBIAN_LOCATIONS } from '../services/weather';
 
 export const Systems: React.FC = () => {
-  const { systems, addSystem, deleteSystem, currentSystem, setCurrentSystemId } = useApp();
+  const { systems, addSystem, deleteSystem, currentSystem, setCurrentSystemId, currentUser } = useApp();
 
   const [name, setName] = useState('');
   const [solarCount, setSolarCount] = useState<number>(8);
@@ -38,7 +38,7 @@ export const Systems: React.FC = () => {
     const cityCoords = ZAMBIAN_LOCATIONS[city] || ZAMBIAN_LOCATIONS[DEFAULT_PROVINCE];
 
     const newSys = addSystem({
-      userId: 'usr_operator',
+      userId: currentUser?.id || '',
       name: name.trim() || `${city} ${systemClass} Space`,
       panelCount: solarCount,
       panelWattage: 450,

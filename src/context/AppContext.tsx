@@ -1,11 +1,21 @@
 import React, { createContext, useContext, useEffect, useState, useMemo, useCallback } from 'react';
 import { Alert, MaintenanceTask, MeterLog, Reading, SolarSystem, User, UserSettings, WeatherSnapshot } from '../types';
 import { storage } from '../services/storage';
+import { ApiError, apiRequest } from '../services/api';
 import { calculateExpectedDailyKwh, tuneCorrectionFactor } from '../services/estimator';
 import { fetchWeather, WeatherCoordinates } from '../services/weather';
 
+const DEFAULT_SETTINGS: UserSettings = {
+  theme: 'system',
+  tariffZmw: 2.5,
+  openWeatherApiKey: '',
+  hasDismissedWelcomeGuide: true,
+};
+
 interface AppContextType {
   currentUser: User | null;
+  authLoading: boolean;
+  syncError: string | null;
   allUsers: User[];
   login: (email: string, password: string) => Promise<boolean>;
   register: (name: string, email: string, password: string) => Promise<boolean>;
@@ -63,22 +73,94 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [currentUser, setCurrentUser] = useState<User | null>(() => storage.getCurrentUser());
-  const [allUsers, setAllUsers] = useState<User[]>(() => storage.getUsers());
-  const [systems, setSystems] = useState<SolarSystem[]>(() => storage.getSystems());
-  const [selectedSystemId, setSelectedSystemId] = useState<string>(() => storage.getSelectedSystemId());
-  const [settings, setSettings] = useState<UserSettings>(() => storage.getSettings());
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [allUsers, setAllUsers] = useState<User[]>([]);
+  const [systems, setSystems] = useState<SolarSystem[]>([]);
+  const [selectedSystemId, setSelectedSystemId] = useState('');
+  const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
   const [weather, setWeather] = useState<WeatherSnapshot | null>(null);
   const [weatherCoordinates, setWeatherCoordinates] = useState<WeatherCoordinates | null>(null);
   const [liveReading, setLiveReading] = useState<Reading | null>(null);
-  const [meterLogs, setMeterLogs] = useState<MeterLog[]>(() => storage.getMeterLogs());
-  const [maintenanceTasks, setMaintenanceTasks] = useState<MaintenanceTask[]>(() => storage.getMaintenanceTasks());
+  const [meterLogs, setMeterLogs] = useState<MeterLog[]>([]);
+  const [maintenanceTasks, setMaintenanceTasks] = useState<MaintenanceTask[]>([]);
   const [showWelcomeModal, setShowWelcomeModal] = useState<boolean>(false);
+
+  const refreshData = useCallback(async () => {
+    try {
+      const data = await apiRequest<{
+        systems: SolarSystem[];
+        meterLogs: MeterLog[];
+        maintenanceTasks: MaintenanceTask[];
+        settings: UserSettings;
+        users?: User[];
+      }>('/api/data');
+      setSystems(data.systems);
+      setMeterLogs(data.meterLogs);
+      setMaintenanceTasks(data.maintenanceTasks);
+      setSettings({ ...DEFAULT_SETTINGS, ...data.settings });
+      if (data.users) setAllUsers(data.users);
+      setSelectedSystemId((current) =>
+        data.systems.some((system) => system.id === current) ? current : data.systems[0]?.id || ''
+      );
+      setSyncError(null);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        setCurrentUser(null);
+        setAllUsers([]);
+        setSystems([]);
+        setMeterLogs([]);
+        setMaintenanceTasks([]);
+        setSettings(DEFAULT_SETTINGS);
+        setSelectedSystemId('');
+        setSyncError('Your session expired or was disabled. Please sign in again.');
+      }
+      throw error;
+    }
+  }, []);
+
+  const persist = useCallback((request: Promise<unknown>) => {
+    void request.catch((error: unknown) => {
+      setSyncError(error instanceof Error ? error.message : 'The change could not be saved to the database.');
+    });
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void apiRequest<{ user: User | null }>('/api/auth/session')
+      .then(async ({ user }) => {
+        if (!active) return;
+        if (user) {
+          setCurrentUser(user);
+          await refreshData();
+        }
+      })
+      .catch((error: unknown) => {
+        if (active) setSyncError(error instanceof Error ? error.message : 'Could not connect to the server.');
+      })
+      .finally(() => {
+        if (active) setAuthLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [refreshData]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    const interval = setInterval(() => {
+      void refreshData().catch((error: unknown) => {
+        setSyncError(error instanceof Error ? error.message : 'Could not refresh shared database data.');
+      });
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [currentUser, refreshData]);
 
   // Alerts are derived strictly from maintenance tasks (as requested)
   const alerts = useMemo(() => {
-    return storage.getAlerts();
-  }, [maintenanceTasks]);
+    return storage.getAlerts(maintenanceTasks, currentUser?.id || '');
+  }, [maintenanceTasks, currentUser?.id]);
 
   // Sync theme to DOM
   useEffect(() => {
@@ -118,8 +200,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const nextTheme: 'light' | 'dark' = isCurrentlyDark ? 'light' : 'dark';
     const updated = { ...settings, theme: nextTheme };
     setSettings(updated);
-    storage.saveSettings(updated);
-  }, [settings]);
+    if (currentUser) {
+      persist(apiRequest('/api/settings', { method: 'PUT', body: JSON.stringify({ theme: nextTheme }) }));
+    }
+  }, [settings, persist, currentUser]);
 
   // Active solar system
   const accessibleSystems = useMemo(() => {
@@ -166,105 +250,57 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => clearInterval(interval);
   }, [triggerLiveTick]);
 
-  // Auth methods
-  const hashPassword = async (password: string): Promise<string> => {
-    const salt = crypto.getRandomValues(new Uint8Array(16));
-    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
-    const digest = await crypto.subtle.deriveBits(
-      { name: 'PBKDF2', salt, iterations: 210000, hash: 'SHA-256' },
-      key,
-      256
-    );
-    const toHex = (bytes: Uint8Array) => Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-    return `${toHex(salt)}:${toHex(new Uint8Array(digest))}`;
-  };
-
   const login = async (email: string, password: string) => {
-    const cleanEmail = email.trim().toLowerCase();
-
     try {
-      const response = await fetch('/api/auth/admin', {
+      const { user } = await apiRequest<{ user: User }>('/api/auth/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail, password }),
+        body: JSON.stringify({ email, password }),
       });
-
-      if (response.ok) {
-        const adminUser = (await response.json()) as User;
-        setCurrentUser(adminUser);
-        setAllUsers((users) => [adminUser, ...users.filter((user) => user.email !== adminUser.email)]);
-        return true;
-      }
-
-      if (response.status !== 401) {
-        return false;
-      }
-    } catch {
-      // Local operator accounts can still sign in while the admin endpoint is unavailable.
-    }
-
-    const found = allUsers.find((u) => u.email.toLowerCase() === cleanEmail);
-    const passwordHash = storage.getUserPasswordHash(cleanEmail);
-    if (found && found.role === 'user' && found.isActive && passwordHash) {
-      const [saltHex, expectedHash] = passwordHash.split(':');
-      const salt = new Uint8Array(saltHex.match(/.{2}/g)?.map((byte) => parseInt(byte, 16)) || []);
-      const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
-      const digest = await crypto.subtle.deriveBits(
-        { name: 'PBKDF2', salt, iterations: 210000, hash: 'SHA-256' },
-        key,
-        256
-      );
-      const actualHash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
-      if (actualHash !== expectedHash) return false;
-      setCurrentUser(found);
+      setCurrentUser(user);
+      await refreshData();
       return true;
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) return false;
+      throw error;
     }
-    return false;
   };
 
   const register = async (name: string, email: string, password: string) => {
-    const cleanEmail = email.trim().toLowerCase();
-    const existing = allUsers.find((u) => u.email.toLowerCase() === cleanEmail);
-    if (existing) {
-      if (existing.role !== 'user' || storage.getUserPasswordHash(cleanEmail)) return false;
-      storage.saveUserPasswordHash(cleanEmail, await hashPassword(password));
-      setCurrentUser(existing);
+    try {
+      const { user } = await apiRequest<{ user: User }>('/api/auth/register', {
+        method: 'POST',
+        body: JSON.stringify({ name, email, password }),
+      });
+      setCurrentUser(user);
+      await refreshData();
       return true;
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409) return false;
+      throw error;
     }
-
-    const newUser: User = {
-      id: `usr_${Date.now()}`,
-      name: name.trim(),
-      email: cleanEmail,
-      role: 'user',
-      isActive: true,
-      createdAt: new Date().toISOString(),
-    };
-
-    storage.saveUserPasswordHash(cleanEmail, await hashPassword(password));
-    const updatedUsers = [...allUsers, newUser];
-    setAllUsers(updatedUsers);
-    storage.saveUsers(updatedUsers);
-
-    setCurrentUser(newUser);
-
-    // No auto-seeded dummy system; start completely clean with space to add a system
-    return true;
   };
 
   const logout = () => {
+    persist(apiRequest('/api/auth/logout', { method: 'POST' }));
     setCurrentUser(null);
+    setAllUsers([]);
+    setSystems([]);
+    setMeterLogs([]);
+    setMaintenanceTasks([]);
+    setSettings(DEFAULT_SETTINGS);
+    setSelectedSystemId('');
   };
 
   const toggleUserStatus = (userId: string) => {
-    const updated = allUsers.map((u) => {
-      if (u.id === userId && u.role !== 'admin') {
-        return { ...u, isActive: !u.isActive };
-      }
-      return u;
-    });
+    const user = allUsers.find((item) => item.id === userId);
+    if (!user || user.role === 'admin') return;
+    const isActive = !user.isActive;
+    const updated = allUsers.map((item) => item.id === userId ? { ...item, isActive } : item);
     setAllUsers(updated);
-    storage.saveUsers(updated);
+    persist(apiRequest(`/api/admin/users/${encodeURIComponent(userId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ isActive }),
+    }));
   };
 
   const deleteUser = (userId: string) => {
@@ -273,41 +309,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const updatedUsers = allUsers.filter((u) => u.id !== userId);
     const updatedSystems = systems.filter((s) => s.userId !== userId);
     setAllUsers(updatedUsers);
-    storage.saveUsers(updatedUsers);
     setSystems(updatedSystems);
-    storage.saveSystems(updatedSystems);
+    setMeterLogs((logs) => logs.filter((log) => updatedSystems.some((system) => system.id === log.systemId)));
+    setMaintenanceTasks((tasks) => tasks.filter((task) => !task.systemId || updatedSystems.some((system) => system.id === task.systemId)));
+    persist(apiRequest(`/api/admin/users/${encodeURIComponent(userId)}`, { method: 'DELETE' }));
   };
 
   // Systems management
   const addSystem = (newSystemData: Omit<SolarSystem, 'id' | 'createdAt' | 'apiKey'>) => {
     const newSys: SolarSystem = {
       ...newSystemData,
-      id: `sys_${Date.now()}`,
+      userId: currentUser?.id || '',
+      id: `sys_${crypto.randomUUID()}`,
       apiKey: `zb_key_${Math.random().toString(36).substring(2, 12)}`,
       createdAt: new Date().toISOString(),
     };
     const updated = [...systems, newSys];
     setSystems(updated);
-    storage.saveSystems(updated);
     setSelectedSystemId(newSys.id);
-    storage.setSelectedSystemId(newSys.id);
+    persist(apiRequest('/api/systems', { method: 'POST', body: JSON.stringify(newSys) }));
     return newSys;
   };
 
   const updateSystem = (id: string, updates: Partial<SolarSystem>) => {
     const updated = systems.map((s) => (s.id === id ? { ...s, ...updates } : s));
     setSystems(updated);
-    storage.saveSystems(updated);
+    persist(apiRequest(`/api/systems/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    }));
   };
 
   const deleteSystem = (id: string) => {
     const updated = systems.filter((s) => s.id !== id);
     setSystems(updated);
-    storage.saveSystems(updated);
+    setMeterLogs((logs) => logs.filter((log) => log.systemId !== id));
+    setMaintenanceTasks((tasks) => tasks.filter((task) => task.systemId !== id));
+    persist(apiRequest(`/api/systems/${encodeURIComponent(id)}`, { method: 'DELETE' }));
     if (selectedSystemId === id) {
       const nextId = updated.length > 0 ? updated[0].id : '';
       setSelectedSystemId(nextId);
-      storage.setSelectedSystemId(nextId);
     }
   };
 
@@ -399,7 +440,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const updatedLogs = [newLog, ...meterLogs];
     setMeterLogs(updatedLogs);
-    storage.saveMeterLogs(updatedLogs);
+    persist(apiRequest('/api/meter-logs', { method: 'POST', body: JSON.stringify(newLog) }));
 
     return { delta, newFactor, totalDayKwh, netKwh };
   };
@@ -418,7 +459,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return t;
     });
     setMaintenanceTasks(updated);
-    storage.saveMaintenanceTasks(updated);
+    const task = updated.find((item) => item.id === taskId);
+    if (task) persist(apiRequest(`/api/maintenance-tasks/${encodeURIComponent(taskId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(task),
+    }));
   };
 
   const resetMaintenanceTask = (taskId: string) => {
@@ -436,12 +481,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return t;
     });
     setMaintenanceTasks(updated);
-    storage.saveMaintenanceTasks(updated);
+    const task = updated.find((item) => item.id === taskId);
+    if (task) persist(apiRequest(`/api/maintenance-tasks/${encodeURIComponent(taskId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(task),
+    }));
   };
 
   const addMaintenanceTask = (title: string, cycleDays: number, dueDate: string) => {
     const newTask: MaintenanceTask = {
-      id: `task_${Date.now()}`,
+      id: `task_${crypto.randomUUID()}`,
       systemId: currentSystem?.id || '',
       title,
       cycleDays: cycleDays || 30,
@@ -450,7 +499,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     const updated = [newTask, ...maintenanceTasks];
     setMaintenanceTasks(updated);
-    storage.saveMaintenanceTasks(updated);
+    persist(apiRequest('/api/maintenance-tasks', { method: 'POST', body: JSON.stringify(newTask) }));
   };
 
   // Settings
@@ -464,13 +513,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const updated = { ...settings, ...permittedUpdates };
     setSettings(updated);
-    storage.saveSettings(updated);
+    persist(apiRequest('/api/settings', { method: 'PUT', body: JSON.stringify(permittedUpdates) }));
   };
 
   return (
     <AppContext.Provider
       value={{
         currentUser,
+        authLoading,
+        syncError,
         allUsers,
         login,
         register,
@@ -482,7 +533,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         currentSystem,
         setCurrentSystemId: (id) => {
           setSelectedSystemId(id);
-          storage.setSelectedSystemId(id);
         },
         addSystem,
         updateSystem,
