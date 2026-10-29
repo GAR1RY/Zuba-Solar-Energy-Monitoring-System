@@ -2,28 +2,21 @@
 
 Zuba is an open-source, web-based photovoltaic and energy storage monitoring platform designed with a calm, restrained interface. It provides solar owners and commercial facility operators with clear visibility into electrical generation, battery storage, and scheduled maintenance.
 
-## Project Folders
-
-- `src/` contains the React application, pages, components, and shared client code.
-- `server/` contains the Express server and SQLite data access code.
-- `data/` contains the local SQLite database, created automatically when the server starts.
-- `.vscode/` contains editor recommendations for working with the project; it is not where the database is stored.
-
 ---
 
 ## Running Locally on Localhost (Zip Download)
 
-The app uses a shared SQLite database on the server. Operators who connect to the same running server share their accounts and operational data; each operator's systems and settings are kept separate. The database is created automatically at `data/zuba.sqlite`.
+This application is completely self-contained and works out of the box on `localhost` without requiring any cloud databases or external API keys.
 
 ### 1. Prerequisites
-- **Node.js** (version 20 or newer)
+- **Node.js** (version 18, 20, or newer recommended)
 - **npm** (included with Node.js)
 
 ### 2. Configure Admin Sign-In
 
 Admin access is verified by the local server. Copy `.env.example` to `.env`, then set a unique, strong `ZUBA_ADMIN_PASSWORD`. The default admin email is `garrymapulanga@gmail.com`; `ZUBA_ADMIN_NAME` and `ZUBA_ADMIN_EMAIL` can be customized in `.env`. Do not commit `.env` or share the password.
 
-The app starts signed out whenever the page is opened. Admin sign-in uses the configured admin email and password; no admin/demo button is shown. Operator accounts are created with an email and password and stored in SQLite. Passwords are hashed on the server.
+The app starts signed out whenever the page is opened. Admin sign-in uses the configured admin email and password; no admin/demo button is shown. Regular operator accounts are created with an email and password and remain stored locally in that browser.
 
 ### 3. Quick Start
 After downloading and extracting the `.zip` archive:
@@ -46,10 +39,7 @@ npm run dev
 Visit **`http://localhost:3000`** in your browser.
 
 - **Sign-In**: Sign in with an existing operator account or create one. Admin credentials are configured separately in the server `.env` file.
-- **Shared SQL storage**: Solar systems, meter logs, maintenance tasks, accounts, and settings are stored in the server's SQLite database. Existing browser-only accounts and data are not imported automatically; operators should create accounts again and re-enter any data they need.
-- **View the database in VS Code**: Install the recommended **SQLite** extension when VS Code prompts you. Open `data/zuba.sqlite` in the Explorer, then use the extension's **Open Database** command to browse tables and run SQL queries.
-- **Backups**: Stop the server before copying `data/zuba.sqlite`; also copy any `zuba.sqlite-wal` and `zuba.sqlite-shm` files if present. Keep database backups private because they contain operational data and account details.
-- **Hosting**: All users must connect to the same running server and its persistent database file. For deployment, use a persistent server disk and HTTPS; do not run multiple server instances against a local SQLite file.
+- **Local Persistence**: Data (solar systems, real meter logs, maintenance cycles, and theme preference) is automatically stored in your browser's `localStorage`.
 - **Zero Config Required**: Weather simulation across the Provinces of Zambia runs locally without requiring an OpenWeather API key. If you have an OpenWeather key, you can optionally connect it in Weather Telemetry.
 - **Solar AI Intelligence**: System-grounded predictions for battery 100% full charge time, morning vs daytime generation, and night energy storage balance. Runs locally with zero setup and connects to Gemini when an API key is available.
 

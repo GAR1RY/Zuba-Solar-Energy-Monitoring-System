@@ -1,14 +1,13 @@
 import React, { useState } from 'react';
 import { ArrowRight, Info, ShieldCheck, Lock, EyeOff, CheckCircle2, X, SunMedium, Eye } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { ThemeToggleButton } from '../components/layout/ThemeToggleButton';
 
 interface AuthProps {
   onViewAbout: () => void;
 }
 
 export const Auth: React.FC<AuthProps> = ({ onViewAbout }) => {
-  const { login, register, syncError } = useApp();
+  const { login, register } = useApp();
 
   const [mode, setMode] = useState<'login' | 'register'>('login');
   // Form starts clean and empty as strictly specified
@@ -43,16 +42,13 @@ export const Auth: React.FC<AuthProps> = ({ onViewAbout }) => {
           setErrorMsg('An account with this email address already exists.');
         }
       }
-    } catch (error) {
-      setErrorMsg(error instanceof Error ? error.message : 'Could not complete sign-in. Please try again.');
+    } catch {
+      setErrorMsg('Could not complete sign-in. Please try again.');
     }
   };
 
   return (
     <div className="fixed inset-0 h-screen h-[100dvh] overflow-y-auto overscroll-contain flex flex-col items-center justify-center p-4 bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100">
-      <div className="absolute top-4 right-4">
-        <ThemeToggleButton />
-      </div>
       <div className="w-full max-w-sm my-auto">
         {/* Brand Lockup with Clean, Uniform Amber State */}
         <div className="text-center mb-7">
@@ -100,12 +96,6 @@ export const Auth: React.FC<AuthProps> = ({ onViewAbout }) => {
             </div>
           )}
 
-          {syncError && (
-            <div role="alert" className="mb-4 p-2.5 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 text-xs text-red-700 dark:text-red-300">
-              Server connection problem: {syncError}
-            </div>
-          )}
-
           <form onSubmit={handleSubmit} className="space-y-3.5">
             {mode === 'register' && (
               <div>
@@ -147,7 +137,7 @@ export const Auth: React.FC<AuthProps> = ({ onViewAbout }) => {
                 className="w-full px-3 py-2 text-xs rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-amber-500"
               />
               <p className="mt-1 text-[11px] text-neutral-400 dark:text-neutral-500">
-                Your email identifies your account on this server and is not used for marketing.
+                Your email is stored locally and will never be shared, sold, or spammed.
               </p>
             </div>
 
@@ -271,14 +261,14 @@ export const Auth: React.FC<AuthProps> = ({ onViewAbout }) => {
                 </p>
               </div>
 
-              {/* Point 2: Shared SQL storage */}
+              {/* Point 2: Local-First Storage */}
               <div className="p-3.5 rounded-2xl bg-neutral-50 dark:bg-neutral-800/40 border border-neutral-200/60 dark:border-neutral-800/60 space-y-1.5">
                 <div className="flex items-center gap-2 font-bold text-neutral-900 dark:text-neutral-100">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                  <span>2. Shared Database & Account Privacy</span>
+                  <span>2. Local Storage & Physical Device Ownership</span>
                 </div>
                 <p className="text-neutral-600 dark:text-neutral-300 text-xs pl-6">
-                  Solar systems, meter logs, maintenance tasks, and operator accounts are stored in the server's shared SQLite database. Each operator can access only their own records; the administrator can manage platform accounts and systems.
+                  All solar system telemetry, hardware sizing specifications, meter logs, and user credentials reside directly in your browser's private local storage (<code className="px-1 py-0.5 rounded bg-neutral-200/60 dark:bg-neutral-700/60 font-mono text-[11px]">localStorage</code>). Your data stays on your machine under your direct physical custody.
                 </p>
               </div>
 
@@ -300,7 +290,7 @@ export const Auth: React.FC<AuthProps> = ({ onViewAbout }) => {
                   <span>4. Complete User Control & Instant Data Erasure</span>
                 </div>
                 <p className="text-neutral-600 dark:text-neutral-300 text-xs pl-6">
-                  Operational data is stored in the shared server database and scoped to your account. Clearing browser data does not delete server records; contact the platform administrator to request account or data removal.
+                  You have full authority over your data. You can export or clear your meter history, reset calibration parameters, or completely wipe stored accounts and data anytime through the Settings panel or by clearing your browser cache.
                 </p>
               </div>
 

@@ -231,14 +231,14 @@ export const About: React.FC = () => {
               </p>
             </div>
 
-            {/* Policy Item 2: Shared SQL storage */}
+            {/* Policy Item 2: Local-First Storage */}
             <div className="p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800/40 border border-neutral-200/60 dark:border-neutral-800/60 space-y-1.5">
               <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400 font-bold text-xs">
                 <CheckCircle2 className="w-4 h-4 shrink-0" />
-                <span>Shared Database & Account Privacy</span>
+                <span>On-Device & Local Storage First</span>
               </div>
               <p className="text-[12px] text-neutral-600 dark:text-neutral-300 leading-normal">
-                Your solar array configurations, meter calibration readings, and settings are stored in the server's shared SQLite database and scoped to your account. Other operators cannot access your records.
+                Your solar array configurations, meter calibration readings, and system preferences are stored locally in your browser's private storage (<code className="px-1 py-0.2 rounded bg-neutral-200/60 dark:bg-neutral-700/60 font-mono text-[11px]">localStorage</code>). Your data never leaves your device without your consent.
               </p>
             </div>
 
