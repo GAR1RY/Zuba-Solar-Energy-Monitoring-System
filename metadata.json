@@ -1,6 +1,0 @@
-{
-  "name": "Zuba Solar Energy Monitoring System",
-  "description": "Local solar energy monitoring application with a React frontend, Python API, and SQLite database.",
-  "requestFramePermissions": [],
-  "majorCapabilities": []
-}
